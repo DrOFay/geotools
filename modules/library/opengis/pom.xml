@@ -25,7 +25,7 @@
   <!-- =========================================================== -->
   <groupId>org.geotools</groupId>
   <artifactId>gt-opengis</artifactId>
-  <packaging>jar</packaging>
+  <packaging>bundle</packaging>
   <name>Open GIS Interfaces</name>
   
   <scm>
@@ -52,6 +52,77 @@
     </license>
   </licenses>
 
+    <build>
+        <plugins>
+			<!-- for information on this plugin, visit http://felix.apache.org/site/apache-felix-maven-bundle-plugin-bnd.html -->
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <version>2.3.7</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <unpackBundle>true</unpackBundle>
+                    <supportedProjectTypes>
+                        <supportedProjectType>war</supportedProjectType>
+                        <supportedProjectType>jar</supportedProjectType>
+                        <supportedProjectType>bundle</supportedProjectType>
+                    </supportedProjectTypes>
+                    <instructions>
+                        <Application-TraceLevels>*=info</Application-TraceLevels>
+                        <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
+                        <Import-Package>
+                            javax.measure.quantity;version="[1.0.0, 2.0.0)";resolution:=optional
+                            ,javax.measure.unit;version="[1.0.0, 2.0.0)";resolution:=optional
+
+                            ,javax.swing
+                            ,org.xml.sax.helpers
+                        </Import-Package>
+                        <Export-Package>
+                            org.opengis.annotation;version="${project.version}"
+                            ,org.opengis.coverage;version="${project.version}"
+                            ,org.opengis.coverage.grid;version="${project.version}"
+                            ,org.opengis.coverage.processing;version="${project.version}"
+                            ,org.opengis.feature;version="${project.version}"
+                            ,org.opengis.feature.simple;version="${project.version}"
+                            ,org.opengis.feature.type;version="${project.version}"
+                            ,org.opengis.filter;version="${project.version}"
+                            ,org.opengis.filter.capability;version="${project.version}"
+                            ,org.opengis.filter.expression;version="${project.version}"
+                            ,org.opengis.filter.identity;version="${project.version}"
+                            ,org.opengis.filter.sort;version="${project.version}"
+                            ,org.opengis.filter.spatial;version="${project.version}"
+                            ,org.opengis.filter.temporal;version="${project.version}"
+                            ,org.opengis.geometry;version="${project.version}"
+                            ,org.opengis.geometry.aggregate;version="${project.version}"
+                            ,org.opengis.geometry.complex;version="${project.version}"
+                            ,org.opengis.geometry.coordinate;version="${project.version}"
+                            ,org.opengis.geometry.primitive;version="${project.version}"
+                            ,org.opengis.metadata;version="${project.version}"
+                            ,org.opengis.metadata.citation;version="${project.version}"
+                            ,org.opengis.metadata.constraint;version="${project.version}"
+                            ,org.opengis.metadata.content;version="${project.version}"
+                            ,org.opengis.metadata.distribution;version="${project.version}"
+                            ,org.opengis.metadata.extent;version="${project.version}"
+                            ,org.opengis.metadata.identification;version="${project.version}"
+                            ,org.opengis.metadata.lineage;version="${project.version}"
+                            ,org.opengis.metadata.maintenance;version="${project.version}"
+                            ,org.opengis.metadata.quality;version="${project.version}"
+                            ,org.opengis.metadata.spatial;version="${project.version}"
+                            ,org.opengis.parameter;version="${project.version}"
+                            ,org.opengis.referencing.crs;version="${project.version}"
+                            ,org.opengis.referencing.cs;version="${project.version}"
+                            ,org.opengis.referencing.datum;version="${project.version}"
+                            ,org.opengis.referencing.operation;version="${project.version}"
+                            ,org.opengis.referencing;version="${project.version}"
+                            ,org.opengis.style;version="${project.version}"
+                            ,org.opengis.temporal;version="${project.version}"
+                            ,org.opengis.util;version="${project.version}"
+                        </Export-Package>
+                    </instructions>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 
   <!-- =========================================================== -->
   <!--     Developers and Contributors                             -->
@@ -165,29 +236,36 @@
         <role>Java developper</role>
       </roles>
     </contributor>
+    <contributor>
+      <name>Justin Griffin</name>
+        <email>justinrgriffin@gmail.com</email>
+      <roles>
+        <role>Java/OSGi Developer</role>
+      </roles>
+    </contributor>
   </contributors>
 
   <!-- =========================================================== -->
   <!--     Dependency Management                                   -->
   <!-- =========================================================== -->
   <dependencies>
-    
-    <dependency>
-      <groupId>net.java.dev.jsr-275</groupId>
-      <artifactId>jsr-275</artifactId>
-    </dependency>
-    
-    <dependency>
-      <groupId>java3d</groupId>
-      <artifactId>vecmath</artifactId>
-      <!-- The version number is specified in the parent POM. -->
-    </dependency>
-    
-    <dependency>
-      <groupId>commons-pool</groupId>
-      <artifactId>commons-pool</artifactId>
-      <!-- The version number is specified in the parent POM. -->
-    </dependency>
+        <dependency>
+            <groupId>net.java.dev.osgi</groupId>
+            <artifactId>net.java.dev.osgi.jsr275</artifactId>
+            <version>1.0.0.beta-2-osgi</version>
+        </dependency>
+
+        <dependency>
+            <groupId>java3d.osgi</groupId>
+            <artifactId>java3d.osgi.vecmath</artifactId>
+            <version>1.3.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>com.springsource.org.apache.commons.pool</artifactId>
+            <version>1.5.3</version>
+        </dependency>
     
     <!-- Test dependencies -->
     <dependency>
