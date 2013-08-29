@@ -71,9 +71,8 @@
                         <Application-TraceLevels>*=info</Application-TraceLevels>
                         <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
                         <Import-Package>
-                            javax.measure.quantity;version="[1.0.0, 2.0.0)";resolution:=optional
-                            ,javax.measure.unit;version="[1.0.0, 2.0.0)";resolution:=optional
-
+                            javax.measure.quantity
+                            ,javax.measure.unit
                             ,javax.swing
                             ,org.xml.sax.helpers
                         </Import-Package>
@@ -252,7 +251,7 @@
         <dependency>
             <groupId>net.java.dev.osgi</groupId>
             <artifactId>net.java.dev.osgi.jsr275</artifactId>
-            <version>1.0.0.beta-2-osgi</version>
+            <version>1.0.0.beta2osgi</version>
         </dependency>
 
         <dependency>
