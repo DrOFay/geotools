@@ -22,10 +22,12 @@ import java.util.logging.Logger;
 
 import javax.swing.Icon;
 
+import org.geotools.filter.ConstantExpression;
 import org.geotools.filter.FilterAttributeExtractor;
 import org.geotools.renderer.style.DynamicSymbolFactoryFinder;
 import org.geotools.renderer.style.ExpressionExtractor;
 import org.geotools.renderer.style.ExternalGraphicFactory;
+import org.geotools.renderer.style.SLDStyleFactory;
 import org.geotools.styling.AnchorPoint;
 import org.geotools.styling.ChannelSelection;
 import org.geotools.styling.ColorMap;
@@ -64,6 +66,7 @@ import org.opengis.filter.Filter;
 import org.opengis.filter.expression.Expression;
 import org.opengis.filter.expression.Literal;
 import org.opengis.filter.expression.NilExpression;
+import org.opengis.filter.expression.PropertyName;
 import org.opengis.style.GraphicalSymbol;
 
 /**
@@ -179,7 +182,8 @@ public class MetaBufferEstimator extends FilterAttributeExtractor implements Sty
     }
     
     protected boolean isNull(Expression exp) {
-        return exp == null || exp instanceof NilExpression; 
+        return exp == null || exp instanceof NilExpression 
+                || (exp instanceof ConstantExpression && ((ConstantExpression) exp).getValue() == null); 
     }
 
     /**
@@ -258,6 +262,46 @@ public class MetaBufferEstimator extends FilterAttributeExtractor implements Sty
      * @see org.geotools.styling.StyleVisitor#visit(org.geotools.styling.TextSymbolizer)
      */
     public void visit(TextSymbolizer text) {
+        // while we cannot account for the label size, we should at least
+        // account for its height, anchor point, and eventual offsets
+        if(text.getFont() != null) {
+
+            int textSize = getPositiveValue(text.getFont().getSize());
+            int delta = -1;
+            if (text.getLabelPlacement() instanceof PointPlacement) {
+                PointPlacement pp = (PointPlacement) text.getLabelPlacement();
+                Displacement pd = pp.getDisplacement();
+                if (pd != null) {
+                    int dx = getPositiveValue(pd.getDisplacementX());
+                    int dy = getPositiveValue(pd.getDisplacementY());
+                    delta = Math.max(dx, dy);
+                }
+                AnchorPoint ap = pp.getAnchorPoint();
+                if (ap != null) {
+                    double ax = Math.abs(getDouble(ap.getAnchorPointX()) - 0.5);
+                    double ay = Math.abs(getDouble(ap.getAnchorPointY()) - 0.5);
+                    int anchorDelta = (int) Math.ceil(Math.max(ax, ay) * textSize);
+                    if (delta > 0) {
+                        delta += anchorDelta;
+                    } else {
+                        delta = anchorDelta;
+                    }
+                }
+            }
+            int total = -1;
+            if (delta > 0) {
+                if (textSize > 0) {
+                    total = delta + textSize;
+                } else {
+                    total = delta;
+                }
+            } else if (textSize > 0) {
+                total = textSize;
+            }
+
+            buffer = Math.max(buffer, total);
+        }
+        
         // take into account label shields if any
         if(text instanceof TextSymbolizer2) {
             Graphic graphic = ((TextSymbolizer2) text).getGraphic();
@@ -274,15 +318,19 @@ public class MetaBufferEstimator extends FilterAttributeExtractor implements Sty
         try {
             Expression grSize = gr.getSize();
             int imageSize = -1;
-            boolean isSizeLiteral = false;
+            boolean isSizeNull = isNull(grSize);
+            boolean isSizeConstant = false;
 
-            if (grSize instanceof Literal) {
-                isSizeLiteral = true;
-                imageSize = (int) Math.ceil(grSize.evaluate(null, Double.class));
-            } else if(!(grSize == null || grSize instanceof NilExpression)) {
-                estimateAccurate = false;
-                return;
+            if(!isSizeNull) {
+                isSizeConstant = isConstant(grSize);
+                if (isSizeConstant) {
+                    imageSize = (int) Math.ceil(grSize.evaluate(null, Double.class));
+                } else {
+                    estimateAccurate = false;
+                    return;
+                }    
             }
+            
 
             for (GraphicalSymbol gs : gr.graphicalSymbols()) {
                 if(gs instanceof ExternalGraphic) {
@@ -301,9 +349,10 @@ public class MetaBufferEstimator extends FilterAttributeExtractor implements Sty
                         }
                         
                         Iterator<ExternalGraphicFactory> it  = DynamicSymbolFactoryFinder.getExternalGraphicFactories();
-                        while(it.hasNext()) {
+                        while(it.hasNext() && icon == null) {
                             try {
-                                icon = it.next().getIcon(null, expanded, eg.getFormat(), imageSize);
+                                ExternalGraphicFactory factory = it.next();
+                                icon = factory.getIcon(null, expanded, eg.getFormat(), imageSize);
                             } catch(Exception e) {
                                 LOGGER.log(Level.FINE, "Error occurred evaluating external graphic", e);
                             }
@@ -320,15 +369,27 @@ public class MetaBufferEstimator extends FilterAttributeExtractor implements Sty
                         }
                     }
                 } else if(gs instanceof Mark) {
-                    if(isSizeLiteral) {
-                        if(imageSize > buffer) {
-                            buffer = imageSize;
-                        }
-                        return;
+                    Mark mark = (Mark) gs;
+                    int markSize;
+                    if(isSizeConstant) {
+                        markSize = imageSize;
                     } else {
-                        estimateAccurate = false;
-                        return;
+                        markSize = SLDStyleFactory.DEFAULT_MARK_SIZE;
                     }
+                    if(mark.getStroke() != null) {
+                        int strokeWidth = getPositiveValue(mark.getStroke().getWidth());
+                        if(strokeWidth < 0) {
+                            estimateAccurate = false;
+                        } else {
+                            markSize += strokeWidth;
+                        }
+                    }
+                    
+                    if(markSize > buffer) {
+                        this.buffer = markSize;
+                    }
+
+                    return;
                 }
 
                 // if we got here we could not find a way to actually estimate the graphic size
@@ -345,21 +406,51 @@ public class MetaBufferEstimator extends FilterAttributeExtractor implements Sty
     }
 
     private void evaluateWidth(Expression width) {
-        attributeExtractor.clear();
-        width.accept(attributeExtractor, null);
-        if (attributeExtractor.isConstantExpression()) {
-            Double result = width.evaluate(null, Double.class);
+        int value = getPositiveValue(width);
+        if(value < 0) {
+            estimateAccurate = false;
+        } else if(value > buffer) {
+            buffer = value;
+        }
+    }
+    
+    private int getPositiveValue(Expression ex) {
+        if (isConstant(ex)) {
+            Double result = ex.evaluate(null, Double.class);
             if(result != null) {
-                int size = (int) Math.ceil(result);
-                if (size > buffer) {
-                    buffer = size;
-                }
+                return (int) Math.ceil(result);
             } else {
-                estimateAccurate = false;
+                return -1;
             }
         } else {
-            estimateAccurate = false;
+            return -1;
         }
+    }
+    
+    private double getDouble(Expression ex) {
+        if (isConstant(ex)) {
+            Double result = ex.evaluate(null, Double.class);
+            if (result != null) {
+                return result;
+            } else {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
+
+    private boolean isConstant(Expression ex) {
+        // quick common cases first
+        if(ex instanceof Literal) {
+            return true;
+        } else if(ex instanceof PropertyName) {
+            return false;
+        } 
+        // ok, check for attribute dependencies and volatile functions then
+        attributeExtractor.clear();
+        ex.accept(attributeExtractor, null);
+        return attributeExtractor.isConstantExpression();
     }
 
     /**

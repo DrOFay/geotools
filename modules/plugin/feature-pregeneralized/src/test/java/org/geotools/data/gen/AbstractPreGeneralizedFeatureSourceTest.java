@@ -2,7 +2,7 @@
  *    GeoTools - The Open Source Java GIS Toolkit
  *    http://geotools.org
  * 
- *    (C) 2002-2008, Open Source Geospatial Foundation (OSGeo)
+ *    (C) 2002-2015, Open Source Geospatial Foundation (OSGeo)
  *    
  *    This library is free software; you can redistribute it and/or
  *    modify it under the terms of the GNU Lesser General Public
@@ -39,8 +39,6 @@ import org.geotools.data.simple.SimpleFeatureIterator;
 import org.geotools.data.simple.SimpleFeatureSource;
 import org.geotools.factory.Hints;
 import org.geotools.filter.AttributeExpressionImpl;
-import org.geotools.filter.Expression;
-import org.geotools.filter.SortBy2;
 import org.geotools.filter.SortByImpl;
 import org.geotools.filter.text.cql2.CQL;
 import org.geotools.geometry.jts.ReferencedEnvelope;
@@ -50,6 +48,7 @@ import org.opengis.feature.FeatureVisitor;
 import org.opengis.feature.simple.SimpleFeature;
 import org.opengis.feature.simple.SimpleFeatureType;
 import org.opengis.filter.Filter;
+import org.opengis.filter.expression.Expression;
 import org.opengis.filter.expression.ExpressionVisitor;
 import org.opengis.filter.expression.PropertyName;
 import org.opengis.filter.sort.SortBy;
@@ -513,24 +512,13 @@ public abstract class AbstractPreGeneralizedFeatureSourceTest extends TestCase {
 
             // SortBy2 sortBy = new SortByImpl(new
             // AttributeExpressionImpl("CAT_ID"),SortOrder.ASCENDING);
-            SortBy2 sortBy = new SortBy2() {
-                public Expression getExpression() {
-                    return null;
-                }
-
-                public void setExpression(Expression expression) {
-                }
-
+            SortBy sortBy = new SortBy() {
                 public PropertyName getPropertyName() {
                     return new AttributeExpressionImpl("CAT_ID");
-
                 }
-
                 public SortOrder getSortOrder() {
                     return SortOrder.ASCENDING;
-
                 }
-
             };
             SimpleFeatureCollection sortedCollection = fCollection
                     .sort(sortBy);
@@ -587,7 +575,7 @@ public abstract class AbstractPreGeneralizedFeatureSourceTest extends TestCase {
             PreGeneralizedDataStore ds = getDataStore(configName);
 
             SimpleFeatureSource fs = ds.getFeatureSource("GenStreams");
-            assertEquals(pureShapefile, fs.getQueryCapabilities().isOffsetSupported());
+            assertTrue(fs.getQueryCapabilities().isOffsetSupported());
             assertTrue(fs.getQueryCapabilities().isReliableFIDSupported());
 
             PropertyName propertyName = new PropertyName() {
@@ -614,7 +602,7 @@ public abstract class AbstractPreGeneralizedFeatureSourceTest extends TestCase {
             };
 
             SortOrder so = SortOrder.valueOf("CAT_ID");
-            assertEquals(pureShapefile, fs.getQueryCapabilities().supportsSorting(
+            assertTrue(fs.getQueryCapabilities().supportsSorting(
                     new SortBy[] { new SortByImpl(propertyName, so) }));
 
             ds.dispose();

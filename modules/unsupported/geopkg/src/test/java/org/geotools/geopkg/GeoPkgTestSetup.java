@@ -1,3 +1,19 @@
+/*
+ *    GeoTools - The Open Source Java GIS Toolkit
+ *    http://geotools.org
+ *
+ *    (C) 2002-2010, Open Source Geospatial Foundation (OSGeo)
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License as published by the Free Software Foundation;
+ *    version 2.1 of the License.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ */
 package org.geotools.geopkg;
 
 import java.io.IOException;
@@ -43,8 +59,8 @@ public class GeoPkgTestSetup extends JDBCTestSetup {
         //drop old data
         runSafe("DROP TABLE ft1");
         runSafe("DROP TABLE ft2");
-        runSafe("DELETE FROM geometry_columns where f_table_name in ('ft1','ft2')");
-        runSafe("DELETE FROM geopackage_contents where table_name in ('ft1','ft2')");
+        runSafe("DELETE FROM gpkg_geometry_columns where f_table_name in ('ft1','ft2')");
+        runSafe("DELETE FROM gpkg_contents where table_name in ('ft1','ft2')");
         
         GeometryBuilder gb = new GeometryBuilder();
 
@@ -73,10 +89,10 @@ public class GeoPkgTestSetup extends JDBCTestSetup {
             + "2,X'"+toString(gb.point(2,2))+"', 2, 2.2,'two');";
         run(sql);
 
-        sql = "INSERT INTO geometry_columns VALUES ('ft1', 'geometry', 'POINT', 2, 4326)";
+        sql = "INSERT INTO gpkg_geometry_columns VALUES ('ft1', 'geometry', 'POINT', 2, 4326)";
         run(sql);
         
-        sql = "INSERT INTO geopackage_contents (table_name, data_type, identifier, srid) VALUES " +
+        sql = "INSERT INTO gpkg_contents (table_name, data_type, identifier, srid) VALUES " +
             "('ft1', 'features', 'ft1', 4326)";
         run(sql);
     }

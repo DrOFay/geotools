@@ -38,11 +38,11 @@ import org.opengis.feature.simple.SimpleFeatureType;
  * </p>
  * 
  * <p>
- * The api has been implemented in terms of FeatureReader<SimpleFeatureType, SimpleFeature> to make
- * explicit that no Features are writen out by this Class.
+ * The API has been implemented in terms of FeatureReader<SimpleFeatureType, SimpleFeature> to make
+ * explicit that no Features are written out by this Class.
  * </p>
  * 
- * @author Jody Garnett, Refractions Research
+ * @author Jody Garnett (Refractions Research)
  * 
  * @see DiffContentState
  * 
@@ -55,13 +55,15 @@ public class DiffContentFeatureWriter implements FeatureWriter<SimpleFeatureType
 
     protected Diff diff;
 
-    SimpleFeature next; // next value aquired by hasNext()
+    SimpleFeature next; // next value acquired by hasNext()
 
     SimpleFeature live; // live value supplied by FeatureReader
 
     SimpleFeature current; // duplicate provided to user
 
     ContentFeatureStore store;
+    
+    SimpleFeatureBuilder builder;
 
     /**
      * DiffFeatureWriter construction.
@@ -72,10 +74,23 @@ public class DiffContentFeatureWriter implements FeatureWriter<SimpleFeatureType
      */
     public DiffContentFeatureWriter(ContentFeatureStore store, Diff diff,
             FeatureReader<SimpleFeatureType, SimpleFeature> reader) {
+        this(store,diff,reader,new SimpleFeatureBuilder(reader.getFeatureType()));
+    }
+    
+    /**
+     * DiffFeatureWriter construction.
+     * 
+     * @param reader
+     * @param diff
+     * @param filter
+     */
+    public DiffContentFeatureWriter(ContentFeatureStore store, Diff diff,
+            FeatureReader<SimpleFeatureType, SimpleFeature> reader, SimpleFeatureBuilder builder) {
         this.store = store;
         this.reader = reader;
         this.state = store.getState();
         this.diff = diff;
+        this.builder = builder;
     }
 
     /**
@@ -103,13 +118,15 @@ public class DiffContentFeatureWriter implements FeatureWriter<SimpleFeatureType
 
             return current;
         } else {
+            if (diff == null) {
+                throw new IOException("FeatureWriter has been closed");
+            }
             // Create new content
             // created with an empty ID
             // (The real writer will supply a FID later)
             live = null;
             next = null;
-            current = SimpleFeatureBuilder.build(type, new Object[type.getAttributeCount()], "new"+
-                     diff.nextFID);
+            current = builder.buildFeature("new"+ diff.nextFID, new Object[type.getAttributeCount()]);
             diff.nextFID++;
             return current;
         }
@@ -186,6 +203,9 @@ public class DiffContentFeatureWriter implements FeatureWriter<SimpleFeatureType
         live = null;
         current = null;
 
+        if (reader == null) {
+            return false;
+        }
         if (reader.hasNext()) {
             try {
                 next = reader.next();

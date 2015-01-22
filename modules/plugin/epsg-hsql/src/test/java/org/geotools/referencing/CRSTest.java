@@ -24,27 +24,30 @@ import junit.framework.Test;
 import junit.framework.TestCase;
 import junit.framework.TestSuite;
 
-import org.opengis.geometry.MismatchedDimensionException;
-import org.opengis.metadata.citation.Citation;
-import org.opengis.referencing.FactoryException;
-import org.opengis.referencing.NoSuchAuthorityCodeException;
-import org.opengis.referencing.cs.AxisDirection;
-import org.opengis.referencing.cs.CoordinateSystem;
-import org.opengis.referencing.cs.CoordinateSystemAxis;
-import org.opengis.referencing.crs.CRSAuthorityFactory;
-import org.opengis.referencing.crs.CoordinateReferenceSystem;
-import org.opengis.referencing.operation.CoordinateOperation;
-import org.opengis.referencing.operation.CoordinateOperationFactory;
-import org.opengis.referencing.operation.MathTransform;
-import org.opengis.referencing.operation.TransformException;
-
-import org.geotools.factory.Hints;
 import org.geotools.factory.GeoTools;
+import org.geotools.factory.Hints;
 import org.geotools.geometry.DirectPosition2D;
+import org.geotools.geometry.Envelope2D;
 import org.geotools.metadata.iso.citation.Citations;
 import org.geotools.referencing.CRS.AxisOrder;
 import org.geotools.referencing.crs.DefaultGeographicCRS;
 import org.geotools.referencing.factory.OrderedAxisAuthorityFactory;
+import org.geotools.referencing.operation.projection.LambertConformal1SP;
+import org.geotools.referencing.operation.projection.TransverseMercator;
+import org.opengis.geometry.Envelope;
+import org.opengis.geometry.MismatchedDimensionException;
+import org.opengis.metadata.citation.Citation;
+import org.opengis.referencing.FactoryException;
+import org.opengis.referencing.NoSuchAuthorityCodeException;
+import org.opengis.referencing.crs.CRSAuthorityFactory;
+import org.opengis.referencing.crs.CoordinateReferenceSystem;
+import org.opengis.referencing.cs.AxisDirection;
+import org.opengis.referencing.cs.CoordinateSystem;
+import org.opengis.referencing.cs.CoordinateSystemAxis;
+import org.opengis.referencing.operation.CoordinateOperation;
+import org.opengis.referencing.operation.CoordinateOperationFactory;
+import org.opengis.referencing.operation.MathTransform;
+import org.opengis.referencing.operation.TransformException;
 
 
 /**
@@ -509,20 +512,20 @@ public class CRSTest extends TestCase {
             System.setProperty("org.geotools.referencing.forceXY", "true");
             
             assertEquals( "CRS:84", CRS.toSRS( DefaultGeographicCRS.WGS84 ));
-            CoordinateReferenceSystem WORLD = (CoordinateReferenceSystem) CRS.decode("EPSG:4326",false);
+            CoordinateReferenceSystem WORLD = CRS.decode("EPSG:4326",false);
             assertEquals( "4326", CRS.toSRS( WORLD, true ) );
             String srs = CRS.toSRS( WORLD, false );
             assertTrue( "EPSG:4326", srs.contains("EPSG") && srs.contains("4326") );
             
-            CoordinateReferenceSystem WORLD2 = (CoordinateReferenceSystem) CRS.decode("EPSG:4326",true);
+            CoordinateReferenceSystem WORLD2 = CRS.decode("EPSG:4326",true);
             srs = CRS.toSRS( WORLD2, false );
             assertTrue( "EPSG:4326", srs.contains("EPSG") && srs.contains("4326") );
             
-            CoordinateReferenceSystem WORLD3 = (CoordinateReferenceSystem) CRS.decode("urn:x-ogc:def:crs:EPSG::4326",false);
+            CoordinateReferenceSystem WORLD3 = CRS.decode("urn:x-ogc:def:crs:EPSG::4326",false);
             srs = CRS.toSRS( WORLD3, false );
             assertTrue( "EPSG:4326", srs.contains("EPSG") && srs.contains("4326") );
             
-            CoordinateReferenceSystem WORLD4 = (CoordinateReferenceSystem) CRS.decode("urn:x-ogc:def:crs:EPSG::4326",true);
+            CoordinateReferenceSystem WORLD4 = CRS.decode("urn:x-ogc:def:crs:EPSG::4326",true);
             srs = CRS.toSRS( WORLD4, false );
             assertTrue( "EPSG:4326", srs.contains("EPSG") && srs.contains("4326") );
         } finally {
@@ -571,5 +574,84 @@ public class CRSTest extends TestCase {
         transform.transform(source, result);
         assertEquals(600000.0, result.x, 0.1);
         assertEquals(200000.0, result.y, 0.1);
+    }
+    
+    public void testGetMapProjection() throws Exception {
+        CoordinateReferenceSystem utm32OnLonLat = CRS.decode("EPSG:23032", true);
+        assertTrue(CRS.getMapProjection(utm32OnLonLat) instanceof TransverseMercator);
+        CoordinateReferenceSystem utm32OnLatLon = CRS.decode("EPSG:23032", false);
+        assertTrue(CRS.getMapProjection(utm32OnLatLon) instanceof TransverseMercator);
+        CoordinateReferenceSystem nad27Tennessee = CRS.decode("EPSG:2062", false);
+        assertTrue(CRS.getMapProjection(nad27Tennessee) instanceof LambertConformal1SP);
+    }
+
+    public void testTransformWgs84PolarStereographic() throws Exception {
+        CoordinateReferenceSystem crs = CRS.decode("EPSG:3031", true);
+        Envelope2D envelope = new Envelope2D(DefaultGeographicCRS.WGS84);
+        envelope.add(-180, -90);
+        envelope.add(180, 0);
+        Envelope transformed = CRS.transform(envelope, crs);
+        // the result is a square
+        assertEquals(transformed.getMaximum(0), transformed.getMaximum(1), 1d);
+        assertEquals(transformed.getMinimum(0), transformed.getMinimum(1), 1d);
+        assertEquals(Math.abs(transformed.getMinimum(0)), transformed.getMaximum(0), 1d);
+
+        assertEquals(transformed.getMaximum(0), 1.236739621845986E7, 1d);
+    }
+
+    public void testTransformPolarStereographicWgs84() throws Exception {
+        CoordinateReferenceSystem crs = CRS.decode("EPSG:3031", true);
+        Envelope2D envelope = new Envelope2D(crs);
+        // random bbox that does include the pole
+        envelope.add(-4223632.8125, -559082.03125);
+        envelope.add(5053710.9375, 3347167.96875);
+        Envelope transformed = CRS.transform(envelope, DefaultGeographicCRS.WGS84);
+        // check we got the whole range of longitudes, since the original bbox contains the pole
+        assertEquals(-180d, transformed.getMinimum(0), 0d);
+        assertEquals(180d, transformed.getMaximum(0), 0d);
+        // another bbox
+        envelope = new Envelope2D(crs);
+        // random bbox that does not include the pole, but it's really just slightly off it
+        envelope.add(-10718812.640513, -10006238.053703);
+        envelope.add(12228504.561708, -344209.75803081);
+        transformed = CRS.transform(envelope, DefaultGeographicCRS.WGS84);
+        assertEquals(-90, transformed.getMinimum(1), 0.1d);
+    }
+
+    public void testTransformLambertAzimuthalEqualAreaWgs84() throws Exception {
+        CoordinateReferenceSystem crs = CRS.decode("EPSG:3574", true);
+        Envelope2D envelope = new Envelope2D(crs);
+        // random bbox that does include the pole
+        envelope.add(-3142000, -3142000);
+        envelope.add(3142000, 3142000);
+        Envelope transformed = CRS.transform(envelope, DefaultGeographicCRS.WGS84);
+        // check we got the whole range of longitudes, since the original bbox contains the pole
+        assertEquals(-180d, transformed.getMinimum(0), 0d);
+        assertEquals(180d, transformed.getMaximum(0), 0d);
+    }
+
+    public void testTransformPolarStereographicWgs84FalseOrigin() throws Exception {
+        // this one has false origins at 6000000/6000000
+        CoordinateReferenceSystem crs = CRS.decode("EPSG:3032", true);
+        Envelope2D envelope = new Envelope2D(crs);
+        envelope.add(5900000, 5900000);
+        envelope.add(6100000, 6100000);
+        Envelope transformed = CRS.transform(envelope, DefaultGeographicCRS.WGS84);
+        // check we got the whole range of longitudes, since the original bbox contains the pole
+        assertEquals(-180d, transformed.getMinimum(0), 0d);
+        assertEquals(180d, transformed.getMaximum(0), 0d);
+    }
+
+    public void testTransformPolarStereographicToOther() throws Exception {
+        CoordinateReferenceSystem antarcticPs = CRS.decode("EPSG:3031", true);
+        CoordinateReferenceSystem australianPs = CRS.decode("EPSG:3032", true);
+        Envelope2D envelope = new Envelope2D(antarcticPs);
+        envelope.add(-4223632.8125, -559082.03125);
+        envelope.add(5053710.9375, 3347167.96875);
+        Envelope transformed = CRS.transform(envelope, australianPs);
+        // has a false easting and northing, we can only check the spans are equal
+        assertEquals(transformed.getSpan(0), transformed.getSpan(1), 1d);
+
+        assertEquals(transformed.getMaximum(0), 1.2309982175378662E7, 1d);
     }
 }

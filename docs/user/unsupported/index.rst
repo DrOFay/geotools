@@ -32,6 +32,7 @@ Modules under active development:
 * :doc:`process/index` - API for working with GeoSpatial processes and annotations to make defining additional processes easy
 * :doc:`swing/index` - collection of GUI components and utilities based on the Swing framework
 * :doc:`swt/index` - collection of GUI components and utilities based on the SWT framework
+* :doc:`/library/coverage/multidim` - New plugins supporting NetCDF and Grib formats
 
 Modules for which volunteers are needed:
 
@@ -56,7 +57,6 @@ Unsupported DataStore implementations:
 * :doc:`efeature/index` (Active) Adds spatial support to (any) EMF model
 * :doc:`/library/data/excel` (Unknown) Support for Microsoft Excel files
 * :doc:`/library/data/georest` (Unknown) Support for a REST service using GeoJSON
-* :doc:`/library/data/ogr` (Inactive) Support for a range of vector file formats using the OGR library
 * :doc:`/library/data/wfs` (Stable but not active) Supports communcation with a Web Feature Server using the standard GeoTools DataStore API
 * :doc:`/library/data/wfs-ng` (Inactive) Experimental code for "next generation" Web Feature Server support
 * :doc:`/library/data/sfs` (Unknown) Support for the experimental GeoServer Simple Feature Service
@@ -70,7 +70,6 @@ Unsuppported ISO 19107 Geometry implementations:
 Unsupported Raster modules:
 
 * :doc:`/library/coverage/coverageio`
-* :doc:`/library/coverage/experiment`
 * :doc:`/library/coverage/image-collection` - publishes a large collection of non georeferenced images as a coverage reader
 * :doc:`/library/coverage/geotiff_new`
 * :doc:`/library/coverage/matlab`

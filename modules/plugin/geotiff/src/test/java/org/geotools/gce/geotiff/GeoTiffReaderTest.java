@@ -30,14 +30,12 @@ import java.util.logging.Logger;
 import javax.media.jai.ImageLayout;
 import javax.media.jai.PlanarImage;
 
-import junit.framework.Assert;
-
 import org.geotools.coverage.grid.GridCoverage2D;
 import org.geotools.coverage.grid.GridEnvelope2D;
 import org.geotools.coverage.grid.GridGeometry2D;
 import org.geotools.coverage.grid.io.AbstractGridFormat;
+import org.geotools.coverage.grid.io.OverviewPolicy;
 import org.geotools.coverage.grid.io.imageio.IIOMetadataDumper;
-import org.geotools.data.DataSourceException;
 import org.geotools.data.PrjFileReader;
 import org.geotools.factory.Hints;
 import org.geotools.geometry.GeneralEnvelope;
@@ -53,6 +51,7 @@ import org.opengis.parameter.ParameterValue;
 import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.NoSuchAuthorityCodeException;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
+import org.opengis.referencing.operation.MathTransform;
 
 /**
  * Testing {@link GeoTiffReader} as well as {@link IIOMetadataDumper}.
@@ -61,7 +60,7 @@ import org.opengis.referencing.crs.CoordinateReferenceSystem;
  *
  * @source $URL$
  */
-public class GeoTiffReaderTest extends Assert {
+public class GeoTiffReaderTest extends org.junit.Assert {
 	private final static Logger LOGGER = org.geotools.util.logging.Logging
 			.getLogger(GeoTiffReaderTest.class.toString());
 
@@ -97,7 +96,7 @@ public class GeoTiffReaderTest extends Assert {
 	        final AbstractGridFormat format = new GeoTiffFormat();
 	        assertTrue(format.accepts(noCrs));
 	        GeoTiffReader reader = (GeoTiffReader) format.getReader(noCrs);
-	        CoordinateReferenceSystem crs=reader.getCrs();
+	        CoordinateReferenceSystem crs=reader.getCoordinateReferenceSystem();
 	        
 	        final File prj= TestData.file(GeoTiffReaderTest.class, "override/sample.prj");
 	        final CoordinateReferenceSystem crs_=new PrjFileReader(new FileInputStream(prj).getChannel()).getCoordinateReferenceSystem();
@@ -172,7 +171,7 @@ public class GeoTiffReaderTest extends Assert {
         final AbstractGridFormat format = new GeoTiffFormat();
         assertTrue(format.accepts(noCrs));
         GeoTiffReader reader = (GeoTiffReader) format.getReader(noCrs);
-        CoordinateReferenceSystem crs=reader.getCrs();
+        CoordinateReferenceSystem crs=reader.getCoordinateReferenceSystem();
         assertTrue(CRS.equalsIgnoreMetadata(crs, DefaultEngineeringCRS.GENERIC_2D));
         GridCoverage2D coverage=reader.read(null);
         assertTrue(CRS.equalsIgnoreMetadata(coverage.getCoordinateReferenceSystem(), DefaultEngineeringCRS.GENERIC_2D));
@@ -456,38 +455,92 @@ public class GeoTiffReaderTest extends Assert {
         final int nOvrs = reader.getNumOverviews();
         LOGGER.info("Number of external overviews: " + nOvrs);
         assertEquals(4, nOvrs);
-        double[][] overviewResolutions = reader.getResolutionLevels();
-        assertEquals(overviewResolutions.length, 5);
+        double[][] availableResolutions = reader.getResolutionLevels();
+        assertEquals(availableResolutions.length, 5);
         
         final ParameterValue<GridGeometry2D> gg =  AbstractGridFormat.READ_GRIDGEOMETRY2D.createValue();
         final GeneralEnvelope envelope = reader.getOriginalEnvelope();
         final Dimension dim = new Dimension();
-        dim.setSize(reader.getOriginalGridRange().getSpan(0)/4.0, reader.getOriginalGridRange().getSpan(1)/4.0);
+        dim.setSize(reader.getOriginalGridRange().getSpan(0)/64.0, reader.getOriginalGridRange().getSpan(1)/64.0);
         final Rectangle rasterArea=(( GridEnvelope2D)reader.getOriginalGridRange());
         rasterArea.setSize(dim);
         final GridEnvelope2D range= new GridEnvelope2D(rasterArea);
-        gg.setValue(new GridGeometry2D(range,envelope));
-        
+        GridGeometry2D gridGeometry = new GridGeometry2D(range,envelope);
+        gg.setValue(gridGeometry);
+
         GridCoverage2D coverage = reader.read(new GeneralParameterValue[] {gg});
         RenderedImage image = coverage.getRenderedImage();
-        assertEquals(image.getWidth(), 32);
-        assertEquals(image.getHeight(), 32);
+        assertEquals(image.getWidth(), 2);
+        assertEquals(image.getHeight(), 2);
         
         final double delta = 0.00001;
-        assertEquals(overviewResolutions[0][0], 5, delta);
-        assertEquals(overviewResolutions[0][1], 5, delta);
+        assertEquals(availableResolutions[0][0], 5, delta);
+        assertEquals(availableResolutions[0][1], 5, delta);
         
-        assertEquals(overviewResolutions[1][0], 10, delta);
-        assertEquals(overviewResolutions[1][1], 10, delta);
+        assertEquals(availableResolutions[1][0], 10, delta);
+        assertEquals(availableResolutions[1][1], 10, delta);
 
-        assertEquals(overviewResolutions[2][0], 20, delta);
-        assertEquals(overviewResolutions[2][1], 20, delta);
+        assertEquals(availableResolutions[2][0], 20, delta);
+        assertEquals(availableResolutions[2][1], 20, delta);
 
-        assertEquals(overviewResolutions[3][0], 40, delta);
-        assertEquals(overviewResolutions[3][1], 40, delta);
+        assertEquals(availableResolutions[3][0], 40, delta);
+        assertEquals(availableResolutions[3][1], 40, delta);
         
-        assertEquals(overviewResolutions[4][0], 80, delta);
-        assertEquals(overviewResolutions[4][1], 80, delta);
+        assertEquals(availableResolutions[4][0], 80, delta);
+        assertEquals(availableResolutions[4][1], 80, delta);
         
+        MathTransform transform = gridGeometry.getGridToCRS();
+        AffineTransform affine = (AffineTransform) transform;
+        double resX = XAffineTransform.getScaleX0(affine);
+        double resY = XAffineTransform.getScaleY0(affine);
+
+        // Using "poor" resolution (less than the worst available overview).
+        double[] resolutions = reader.getReadingResolutions(OverviewPolicy.QUALITY, new double[]{resX, resY});
+        // Checking that the reading resolution will be the one of the worst (last) overview
+        assertEquals(resolutions[0], availableResolutions[nOvrs][0], delta);
+        assertEquals(resolutions[1], availableResolutions[nOvrs][1], delta);
+
+        // Using a middle resolution
+        resolutions = reader.getReadingResolutions(OverviewPolicy.QUALITY, new double[]{resX/8, resY/8});
+        assertEquals(resolutions[0], 40, delta);
+        assertEquals(resolutions[1], 40, delta);
+
+        // Using native resolution
+        resolutions = reader.getReadingResolutions(OverviewPolicy.QUALITY, availableResolutions[0]);
+        assertEquals(resolutions[0], availableResolutions[0][0], delta);
+        assertEquals(resolutions[1], availableResolutions[0][1], delta);
+
     }
+    
+    /**
+     * The leak geotiff is a strange geotiff with PixelScale and TiePoints that are all 0
+     * hence the matrix we come up with is all 0 and not invertibile.
+     * 
+     *  This is not acceptable as we need a transformation that allows us to go back and forth between 
+     *  raster and model space.
+     *  
+     *  Side effect of this, we leak an open file due to the exception thrown during a read operation.
+     * 
+     * @throws Exception
+     */
+	@Test
+	// @Ignore
+	public void testLeakedOpenFileFix() throws Exception {
+		final File file = TestData.file(GeoTiffReaderTest.class, "leak.tiff");
+		assertNotNull(file);
+		assertEquals(true, file.exists());
+
+		try {
+
+			@SuppressWarnings("unused")
+			GeoTiffReader reader = new GeoTiffReader(file);
+			assertTrue(false);
+		} catch (Exception e) {
+			assertTrue(true);
+		}
+
+		// this files if things went wrong and the fix is not working (on Windows especially)
+		assertTrue(file.delete());
+
+	}
 }

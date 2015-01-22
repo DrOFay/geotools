@@ -905,7 +905,7 @@ public class RasterSymbolizerTest  extends org.junit.Assert{
 
  
 	@Test
-	public void colorColorMaInterpolation() throws Exception {
+	public void colorMapInterpolation() throws Exception {
 		////
 		//
 		// Test using an SLD file
@@ -946,7 +946,7 @@ public class RasterSymbolizerTest  extends org.junit.Assert{
 		RenderedImage image = renderer.renderImage(gc, rs, new InterpolationBilinear(), null, 256, 256);
 		assertNotNull(image);
 		assertNotNull(PlanarImage.wrapRenderedImage(image));
-		assertFalse(image.getColorModel() instanceof IndexColorModel);
+		assertTrue(image.getColorModel() instanceof IndexColorModel);
 		
 		// nearest
                 image = renderer.renderImage(gc, rs, new InterpolationNearest(), null, 256, 256);
@@ -1270,4 +1270,31 @@ public class RasterSymbolizerTest  extends org.junit.Assert{
 		
 	}
 
+	@org.junit.Test
+	public void testUshort() throws IOException {
+		////
+		//
+		// Test using an SLD file
+		//
+		////
+		GeneralEnvelope envelope = new GeneralEnvelope(new double[] { -180,-90 },new double[] { 180,90 });
+			envelope.setCoordinateReferenceSystem(DefaultGeographicCRS.WGS84);
+		java.net.URL surl = TestData.url(this, "raster.sld");
+		SLDParser stylereader = new SLDParser(sf, surl);
+		StyledLayerDescriptor sld = stylereader.parseSLD();
+
+		// get a coverage
+		GridCoverage2D gc = CoverageFactoryFinder.getGridCoverageFactory(null)
+				.create(
+						"name",
+						JAI.create("ImageRead", TestData.file(this,"test_ushort.tif")),
+						envelope,new GridSampleDimension[]{new GridSampleDimension("test_dimension")},null,null);
+		SubchainStyleVisitorCoverageProcessingAdapter rsh = new RasterSymbolizerHelper(gc, null);
+		final RasterSymbolizer rs = extractRasterSymbolizer(sld);
+		rsh.visit(rs);
+		// Check if the final image has been rescaled to bytes
+		RenderedImage outputImage = ((GridCoverage2D)rsh.getOutput()).getRenderedImage();
+		int dataType = outputImage.getSampleModel().getDataType();
+		assertEquals(DataBuffer.TYPE_BYTE, dataType);
+	}
 }

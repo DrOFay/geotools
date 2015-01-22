@@ -36,7 +36,6 @@ import org.geotools.feature.FeatureIterator;
 import org.geotools.feature.FeatureTypes;
 import org.geotools.feature.SchemaException;
 import org.geotools.feature.simple.SimpleFeatureTypeBuilder;
-import org.geotools.filter.SortBy;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.util.logging.Logging;
 import org.opengis.feature.simple.SimpleFeature;
@@ -328,10 +327,6 @@ public class ContentFeatureCollection implements SimpleFeatureCollection {
         throw new UnsupportedOperationException( "read only" );
     }
     
-    public SimpleFeatureCollection sort(SortBy order) {
-        return sort( (org.opengis.filter.sort.SortBy) order );
-    }
-    
     public SimpleFeatureCollection sort(org.opengis.filter.sort.SortBy sort) {
         Query query = new Query();
         query.setSortBy( new org.opengis.filter.sort.SortBy[]{sort});
@@ -489,7 +484,7 @@ public class ContentFeatureCollection implements SimpleFeatureCollection {
         }
     }
     public String getID() {
-        throw new UnsupportedOperationException();
+        return null; // Only useful for XML Content
     }
 
 }

@@ -16,14 +16,14 @@
  */
 package org.geotools.data.wfs.internal.parsers;
 
-import static org.geotools.data.wfs.impl.WFSTestData.*;
-import static org.geotools.data.wfs.impl.WFSTestData.CUBEWERX_ROADSEG;
-import static org.geotools.data.wfs.impl.WFSTestData.GEOS_ARCHSITES_11;
-import static org.geotools.data.wfs.impl.WFSTestData.GEOS_ROADS_11;
-import static org.geotools.data.wfs.impl.WFSTestData.GEOS_STATES_10;
-import static org.geotools.data.wfs.impl.WFSTestData.GEOS_STATES_11;
-import static org.geotools.data.wfs.impl.WFSTestData.GEOS_TASMANIA_CITIES_11;
-import static org.geotools.data.wfs.impl.WFSTestData.IONIC_STATISTICAL_UNIT;
+import static org.geotools.data.wfs.WFSTestData.*;
+import static org.geotools.data.wfs.WFSTestData.CUBEWERX_ROADSEG;
+import static org.geotools.data.wfs.WFSTestData.GEOS_ARCHSITES_11;
+import static org.geotools.data.wfs.WFSTestData.GEOS_ROADS_11;
+import static org.geotools.data.wfs.WFSTestData.GEOS_STATES_10;
+import static org.geotools.data.wfs.WFSTestData.GEOS_STATES_11;
+import static org.geotools.data.wfs.WFSTestData.GEOS_TASMANIA_CITIES_11;
+import static org.geotools.data.wfs.WFSTestData.IONIC_STATISTICAL_UNIT;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -148,7 +148,7 @@ public abstract class AbstractGetFeatureParserTest {
     }
 
     /**
-     * Uses a {@link StreamingParserFeatureReader} to parse the features while traversing the
+     * Uses a {@link PullParserFeatureReader} to parse the features while traversing the
      * feature collection in a test {@code wfs:FeatureCollection} document; {@code assertor} is a
      * visitor provided by the actual unit test calling this method, every feature fetched is passed
      * to the visitor who contains the specific assertions.
@@ -209,7 +209,7 @@ public abstract class AbstractGetFeatureParserTest {
     /**
      * Verifies correctness on parsing a normal geoserver WFS 1.1.0 GetFeature response.
      * 
-     * Test method for {@link StreamingParserFeatureReader#parse()}.
+     * Test method for {@link PullParserFeatureReader#parse()}.
      * 
      * @throws Exception
      */
@@ -257,7 +257,7 @@ public abstract class AbstractGetFeatureParserTest {
      * Verifies correctness on parsing a normal geoserver WFS 1.1.0 GetFeature response for the
      * usual topp:states feature type (multipolygon).
      * 
-     * Test method for {@link StreamingParserFeatureReader#parse()}.
+     * Test method for {@link PullParserFeatureReader#parse()}.
      * 
      * @throws Exception
      */
@@ -369,7 +369,7 @@ public abstract class AbstractGetFeatureParserTest {
     @Test
     public void testParseGeoServer_roads_MultiLineString_110() throws Exception {
         final QName featureName = GEOS_ROADS_11.TYPENAME;
-        final int expectedCount = 1;
+        final int expectedCount = 3;
         final URL schemaLocation = GEOS_ROADS_11.SCHEMA;
 
         final String[] properties = { "the_geom", "label" };

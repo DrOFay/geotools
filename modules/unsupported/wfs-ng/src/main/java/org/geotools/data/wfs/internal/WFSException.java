@@ -2,7 +2,7 @@
  *    GeoTools - The Open Source Java GIS Toolkit
  *    http://geotools.org
  *
- *    (C) 2002-2008, Open Source Geospatial Foundation (OSGeo)
+ *    (C) 2002-2014, Open Source Geospatial Foundation (OSGeo)
  *
  *    This library is free software; you can redistribute it and/or
  *    modify it under the terms of the GNU Lesser General Public
@@ -17,8 +17,6 @@
 package org.geotools.data.wfs.internal;
 
 import java.io.IOException;
-
-import org.geotools.data.wfs.internal.parsers.ExceptionReportParser;
 
 /**
  * A Java Exception that mirrors a WFS {@code ExceptionReport} and is meant to be produced by

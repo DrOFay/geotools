@@ -1,3 +1,19 @@
+/*
+ *    GeoTools - The Open Source Java GIS Toolkit
+ *    http://geotools.org
+ *
+ *    (C) 2008-2014, Open Source Geospatial Foundation (OSGeo)
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License as published by the Free Software Foundation;
+ *    version 2.1 of the License.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ */
 package org.geotools.data.wfs.internal.v2_0;
 
 import java.net.URI;
@@ -9,6 +25,7 @@ import java.util.Set;
 import java.util.logging.Level;
 
 import javax.xml.XMLConstants;
+import javax.xml.namespace.QName;
 
 import net.opengis.ows11.KeywordsType;
 import net.opengis.ows11.LanguageStringType;
@@ -36,7 +53,7 @@ public class FeatureTypeInfoImpl implements FeatureTypeInfo {
     @Override
     public String getTitle() {
         return eType.getTitle() == null || eType.getTitle().isEmpty() ? null : String.valueOf(eType
-                .getTitle().get(0));
+                .getTitle().get(0).getValue());
     }
 
     @Override
@@ -69,6 +86,10 @@ public class FeatureTypeInfoImpl implements FeatureTypeInfo {
     @Override
     public String getName() {
         return eType.getName().getLocalPart();
+    }
+    
+    public QName getQName() {
+        return eType.getName();
     }
 
     @Override
@@ -164,5 +185,16 @@ public class FeatureTypeInfoImpl implements FeatureTypeInfo {
         }
 
         return new HashSet<String>(ftypeDeclaredFormats);
+    }
+
+    @Override
+    public String getAbstract() {
+        StringBuffer sb = new StringBuffer();
+        for (Object a : eType.getAbstract()) {
+            sb.append(a);
+            sb.append(" ");
+        }
+        sb.setLength(sb.length()-1);
+        return sb.toString();
     }
 }

@@ -16,7 +16,7 @@
   <parent>
     <groupId>org.geotools</groupId>
     <artifactId>modules</artifactId>
-    <version>11-SNAPSHOT</version>
+    <version>13-SNAPSHOT</version>
   </parent>
 
 
@@ -51,16 +51,6 @@
        <modules>
          <module>coveragetools</module>
          <module>excel</module>
-       </modules>
-     </profile>
-
-     <!-- ================================================== -->
-     <!--     Modules kicked out of the build                -->
-     <!-- ================================================== -->
-     <profile>
-       <id>archive</id>
-       <modules>
-         <module>ogr</module>
        </modules>
      </profile>
 
@@ -140,23 +130,21 @@
        </modules>
      </profile>
      <profile>
-       <id>ogr</id>
-       <modules>
-         <module>ogr</module>
-       </modules>
+      <id>solr</id>
+      <activation>
+         <property><name>all</name></property>
+       </activation>
+	  <modules>
+        <module>solr</module>
+	  </modules>
      </profile>
      <profile>
-       <id>wfs-ng</id>
-       <modules>
-         <module>wfs-ng</module>
-       </modules>
-     </profile>
-     <profile>
+       <id>css</id>
        <activation>
          <property><name>all</name></property>
        </activation>
        <modules>
-         <module>coverage-experiment</module>
+         <module>css</module>
        </modules>
      </profile>
      <profile>
@@ -171,11 +159,11 @@
          <module>vpf</module>
          <module>matfile5</module>
          <module>sfs</module>
-         <module>mark-wkt</module>
          <module>feature-aggregate</module>
          <module>mongodb</module>
-         <module>property-ng</module>
-         <module>shapefile-old</module>
+         <module>property-old</module>
+         <module>solr</module>
+         <module>css</module>
        </modules>
      </profile>
   </profiles>
@@ -188,6 +176,8 @@
     <module>wfs</module>
     <module>geojson</module>
     <module>geopkg</module>
+    <module>mbtiles</module>
+    <module>wfs-ng</module>
   </modules>
 
 </project>

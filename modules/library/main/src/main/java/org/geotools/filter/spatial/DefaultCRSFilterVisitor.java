@@ -18,10 +18,12 @@ package org.geotools.filter.spatial;
 
 import org.geotools.filter.visitor.DuplicatingFilterVisitor;
 import org.geotools.geometry.jts.ReferencedEnvelope;
+import org.geotools.referencing.CRS;
 import org.opengis.filter.FilterFactory2;
 import org.opengis.filter.expression.Literal;
 import org.opengis.filter.spatial.BBOX;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
+import org.opengis.referencing.crs.SingleCRS;
 
 import com.vividsolutions.jts.geom.Geometry;
 
@@ -48,10 +50,21 @@ public class DefaultCRSFilterVisitor extends DuplicatingFilterVisitor {
         if (srs != null && !"".equals(srs.trim()))
             return super.visit(filter, extraData);
 
-        try {  
-        	return getFactory(extraData).bbox(filter.getExpression1(), ReferencedEnvelope.create(filter.getBounds(),defaultCrs));
-        } catch (Exception e) {
-            throw new RuntimeException("Could not decode srs '" + srs + "'", e);
+        if (defaultCrs == null
+                || filter.getBounds() == null
+                || defaultCrs.getCoordinateSystem().getDimension() == filter.getBounds()
+                        .getDimension()) {
+            return getFactory(extraData).bbox(filter.getExpression1(),
+                    ReferencedEnvelope.create(filter.getBounds(), defaultCrs));
+        } else {
+            try {
+                SingleCRS horizontalCRS = CRS.getHorizontalCRS(defaultCrs);
+                ReferencedEnvelope bounds = ReferencedEnvelope.create(filter.getBounds(),
+                        horizontalCRS);
+                return getFactory(extraData).bbox(filter.getExpression1(), bounds);
+            } catch (Exception e) {
+                throw new RuntimeException("Could not decode srs '" + srs + "'", e);
+            }
         }
     }
     

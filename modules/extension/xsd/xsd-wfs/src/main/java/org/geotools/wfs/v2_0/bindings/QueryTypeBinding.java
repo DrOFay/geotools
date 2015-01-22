@@ -2,7 +2,7 @@
  *    GeoTools - The Open Source Java GIS Toolkit
  *    http://geotools.org
  *
- *    (C) 2002-2011, Open Source Geospatial Foundation (OSGeo)
+ *    (C) 2002-2014, Open Source Geospatial Foundation (OSGeo)
  *
  *    This library is free software; you can redistribute it and/or
  *    modify it under the terms of the GNU Lesser General Public
@@ -17,7 +17,8 @@
 package org.geotools.wfs.v2_0.bindings;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 
 import javax.xml.namespace.NamespaceContext;
@@ -27,11 +28,12 @@ import net.opengis.wfs20.QueryType;
 import net.opengis.wfs20.Wfs20Factory;
 
 import org.eclipse.emf.ecore.EObject;
+import org.geotools.util.Converters;
 import org.geotools.wfs.v2_0.WFS;
 import org.geotools.xml.ComplexEMFBinding;
 import org.geotools.xs.bindings.XSQNameBinding;
-import org.opengis.filter.Filter;
-import org.opengis.filter.sort.SortBy;
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
 
 public class QueryTypeBinding extends ComplexEMFBinding {
 
@@ -63,6 +65,55 @@ public class QueryTypeBinding extends ComplexEMFBinding {
                 q.getTypeNames().addAll(qNames);
             }
         }
+    }
+    
+    @Override
+    public Object getProperty(Object object, QName name) throws Exception {
+        if ("aliases".equalsIgnoreCase(name.getLocalPart())) {
+            List aliases = ((QueryType)object).getAliases();
+            if (aliases.size() == 0) return null;
+            
+            StringBuffer ret = new StringBuffer();
+            for (Object o : aliases) {
+                String alias = (String)o;
+                if (ret.length() > 0) ret.append(",");
+                ret.append(alias);
+            }
+            
+            return ret.toString();
+        } else if ("typeNames".equalsIgnoreCase(name.getLocalPart())) {
+            StringBuilder s = new StringBuilder();
+            for (Object typeName : ((QueryType) object).getTypeNames()) {
+                if (typeName instanceof Collection) {
+                    typeName = ((Collection) typeName).iterator().next();
+                }
+                s.append(Converters.convert(typeName, String.class));
+                s.append(",");
+            }
+            s.setLength(s.length() - 1);
+            return s.toString();
+        }
+        else if (("AbstractProjectionClause").equalsIgnoreCase(name.getLocalPart())){
+            return null;
+        }
+        
+        return super.getProperty(object, name);
+    }
+    
+    @Override
+    public Element encode(Object object, Document document, Element value) throws Exception {
+        Element e = super.encode(object, document, value);
+
+        QueryType resultType = (QueryType) object;
+
+        Iterator it = resultType.getAbstractProjectionClause().iterator();
+        while (it.hasNext()) {
+            Element node = document.createElementNS(WFS.NAMESPACE, "PropertyName");
+            node.setTextContent(Converters.convert(it.next(), String.class));
+            e.appendChild(node);
+        }
+
+        return e;
     }
 
 }

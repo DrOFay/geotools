@@ -36,6 +36,7 @@ import org.geotools.coverage.grid.io.AbstractGridFormat;
 import org.geotools.data.DataUtilities;
 import org.geotools.factory.Hints;
 import org.geotools.gce.imagemosaic.GranuleDescriptor.GranuleOverviewLevelDescriptor;
+import org.geotools.gce.imagemosaic.catalog.MultiLevelROI;
 import org.geotools.geometry.GeneralEnvelope;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.referencing.CRS;
@@ -54,8 +55,6 @@ import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.datum.PixelInCell;
 import org.opengis.referencing.operation.NoninvertibleTransformException;
-
-import com.vividsolutions.jts.geom.Geometry;
 
 /**
  * Testing {@link GranuleDescriptor} class.
@@ -97,7 +96,7 @@ public class GranuleTest extends Assert {
 		
 		//Create a GranuleDescriptor
 		final GranuleDescriptor granuleDescriptor = new GranuleDescriptor(DataUtilities.urlToFile(testUrl).getAbsolutePath()
-		        , TEST_BBOX, spi, (Geometry) null);
+		        , TEST_BBOX, spi, (MultiLevelROI) null);
 		assertNotNull(granuleDescriptor.toString());
 		
 		//Get a GranuleOverviewLevelDescriptor
@@ -152,7 +151,7 @@ public class GranuleTest extends Assert {
 		testUrl.openStream().close();
 		
 		final GranuleDescriptor granuleDescriptor = new GranuleDescriptor(DataUtilities.urlToFile(testUrl).getAbsolutePath()
-                        , TEST_BBOX, spi, (Geometry) null);
+                        , TEST_BBOX, spi, (MultiLevelROI) null);
 		final GranuleOverviewLevelDescriptor granuleOverviewLevelDescriptor = granuleDescriptor.getLevel(0);
 		assertNotNull(granuleOverviewLevelDescriptor);
 		
@@ -271,7 +270,7 @@ public class GranuleTest extends Assert {
         final RasterLayerRequest requestNE = new RasterLayerRequest(
                 new GeneralParameterValue[] { requestedBBox }, manager);
 
-        BoundingBox checkCropBBox = requestNE.spatialRequestHelper.getCropBBox();
+        BoundingBox checkCropBBox = requestNE.spatialRequestHelper.getComputedBBox();
         assertNotNull(checkCropBBox);
         assertEquals(
                 "ReferencedEnvelope[1587997.8835 : 1612003.2265, 6162000.4515 : 6198002.1165]",
@@ -286,7 +285,7 @@ public class GranuleTest extends Assert {
         final RasterLayerRequest requestEN = new RasterLayerRequest(
                 new GeneralParameterValue[] { requestedBBox }, manager);
 
-        checkCropBBox = requestEN.spatialRequestHelper.getCropBBox();
+        checkCropBBox = requestEN.spatialRequestHelper.getComputedBBox();
         assertNotNull(checkCropBBox);
         assertEquals(
                 "ReferencedEnvelope[1587997.8835 : 1612003.2265, 6162000.4515 : 6198002.1165]",

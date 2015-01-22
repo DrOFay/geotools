@@ -1,12 +1,11 @@
 Property Plugin
 ---------------
 
-DataStore supporting the use of simple java property files for storing spatial data. This was
-originally a tutorial in the use of AbstractDataStore and has become useful in its own right.
+DataStore supporting the use of simple java property files for storing spatial data. This was originally based on a tutorial in the use of AbstractDataStore, but has now been migrated to use ContentDataStore. The old implementation has been moved to the unsupported module.
 
 **Reference**
 
-* :doc:`/tutorial/abstractdatastore`
+* :doc:`/tutorial/datastore/index`
 
 **Maven**::
    
@@ -19,7 +18,7 @@ originally a tutorial in the use of AbstractDataStore and has become useful in i
 Example
 ^^^^^^^
 
-The property datastore works with a custom format based on Java properity files::
+The property datastore works with a custom format based on Java property files::
   
   _=id:Integer,geom:Geometry,name:String
   rd1=1|wkt|road one

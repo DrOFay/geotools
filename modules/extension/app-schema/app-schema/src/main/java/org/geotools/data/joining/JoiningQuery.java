@@ -17,6 +17,7 @@
 package org.geotools.data.joining;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import org.geotools.data.Query;
@@ -34,12 +35,11 @@ import org.opengis.filter.sort.SortBy;
  */
 public class JoiningQuery extends Query {
     
-    public static class QueryJoin {
+    public static class QueryJoin extends JoiningQuery {
         protected String joiningTypeName;    
         protected Expression foreignKeyName;    
         protected Expression joiningKeyName;
         protected SortBy[] sortBy;
-        protected List<String> ids = new ArrayList<String>(); 
                 
         public String getJoiningTypeName() {
             return joiningTypeName;
@@ -52,10 +52,6 @@ public class JoiningQuery extends Query {
         public Expression getForeignKeyName() {
             return foreignKeyName;
         }
-        
-        public SortBy[] getSortBy() {
-            return sortBy;
-        }
 
         public void setForeignKeyName(Expression foreignKeyName) {
             this.foreignKeyName = foreignKeyName;
@@ -67,19 +63,7 @@ public class JoiningQuery extends Query {
 
         public void setJoiningKeyName(Expression joiningKeyName) {
             this.joiningKeyName = joiningKeyName;
-        }
-        
-        public void setSortBy(SortBy[] sortBy){
-            this.sortBy = sortBy;
-        }
-        
-        public void addId(String pn) {
-            this.ids.add(pn);
-        }
-        
-        public List<String> getIds() {
-            return ids;
-        }
+        }  
     }
     
     protected List<QueryJoin> queryJoins;
@@ -91,17 +75,25 @@ public class JoiningQuery extends Query {
      */
     private boolean isSubset;
     
+    private boolean isDenormalised;
+    
+    protected List<String> ids; 
+    
     public JoiningQuery(JoiningQuery query) {
         super(query);
         setQueryJoins(query.getQueryJoins());
         setSubset(query.isSubset);
+        isDenormalised = query.isDenormalised;
+        ids = query.ids;
     }
     
     public JoiningQuery(Query query){
         super(query);
+        ids = new ArrayList<String>();
     }
     
     public JoiningQuery() {
+        ids = new ArrayList<String>();
     }   
     
     public void setQueryJoins(List<QueryJoin> queryJoins){
@@ -109,6 +101,9 @@ public class JoiningQuery extends Query {
     }
     
     public List<QueryJoin> getQueryJoins(){
+        if (queryJoins == null) {
+            return Collections.EMPTY_LIST;
+        }
         return queryJoins;
     }
     
@@ -118,6 +113,26 @@ public class JoiningQuery extends Query {
     
     public boolean isSubset() {
         return isSubset;
+    }
+    
+    public boolean hasIdColumn() {
+        return !ids.isEmpty();
+    }
+    
+    public void addId(String pn) {
+        this.ids.add(pn);
+    }
+    
+    public List<String> getIds() {
+        return ids;
+    }
+    
+    public boolean isDenormalised() {
+        return isDenormalised;
+    }
+    
+    public void setDenormalised(boolean isDenormalised) {
+        this.isDenormalised = isDenormalised;
     }
 
 }

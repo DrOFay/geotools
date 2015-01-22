@@ -1,3 +1,19 @@
+/*
+ *    GeoTools - The Open Source Java GIS Toolkit
+ *    http://geotools.org
+ *
+ *    (C) 2008-2014, Open Source Geospatial Foundation (OSGeo)
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License as published by the Free Software Foundation;
+ *    version 2.1 of the License.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ */
 package org.geotools.data.wfs.internal;
 
 import static org.geotools.data.wfs.internal.HttpMethod.GET;
@@ -154,7 +170,12 @@ public abstract class WFSRequest extends AbstractRequest implements Request {
 
     @Override
     public String getPostContentType() {
-        return getOutputFormat();
+        // As per WFS 1.1.0 (OGC 04-094) 6.5.1
+        // "When using the HTTP POST method, the content type for XML encoded WFS requests must be set to text/xml."
+        //  .. and
+        // As per WFS 2.0.0 (OGC 09-025r1 and ISO/DIS 19142) Annex D.2
+        // "When using the HTTP POST method, the content type for XML encoded WFS requests shall be set to text/xml."
+        return "text/xml";
     }
 
     @Override

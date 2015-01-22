@@ -41,11 +41,7 @@ public class IDFunction extends FunctionExpressionImpl {
             String.class);
     
 	public IDFunction() {
-	    super("id");
-	}
-
-	public int getArgCount() {
-		return 0;
+	    super(NAME);
 	}
 
 	public String toString() {

@@ -351,8 +351,7 @@ class WMSCoverageReader extends AbstractGridCoverage2DReader {
                 }
             }
         } catch (Exception e) {
-            throw (IOException) new IOException("Could not reproject the request envelope")
-                    .initCause(e);
+            throw new IOException("Could not reproject the request envelope", e);
         }
 
         GetMapRequest mapRequest = wms.createGetMapRequest();
@@ -434,6 +433,19 @@ class WMSCoverageReader extends AbstractGridCoverage2DReader {
     ReferencedEnvelope reference(GeneralEnvelope ge) {
         return new ReferencedEnvelope(ge.getMinimum(0), ge.getMaximum(0), ge.getMinimum(1), ge
                 .getMaximum(1), ge.getCoordinateReferenceSystem());
+    }
+    
+    @Override
+    public String[] getMetadataNames() {
+        return new String[] { REPROJECTING_READER };
+    }
+    
+    @Override
+    public String getMetadataValue(String name) {
+        if(REPROJECTING_READER.equals(name)) {
+            return "true";
+        }
+        return super.getMetadataValue(name);
     }
     
 }

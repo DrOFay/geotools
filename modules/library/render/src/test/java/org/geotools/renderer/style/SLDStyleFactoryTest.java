@@ -165,8 +165,8 @@ public class SLDStyleFactoryTest extends TestCase {
         // no general path equality implemented, we have to check manually
         PathIterator piExpected = expected.getPathIterator(new AffineTransform());
         PathIterator pi = ms.getShape().getPathIterator(new AffineTransform());
-        double[] coordsExpected = new double[2];
-        double[] coords = new double[2];
+        double[] coordsExpected = new double[6];
+        double[] coords = new double[6];
         assertEquals(piExpected.getWindingRule(), pi.getWindingRule());
         while(!piExpected.isDone()) {
             assertFalse(pi.isDone());
@@ -360,12 +360,12 @@ public class SLDStyleFactoryTest extends TestCase {
      }
     
     
-     public void testInfiniteLoopAvoidance() throws Exception {
+     public void testFallbackGraphicMark() throws Exception {
          PointSymbolizer symb = sf.createPointSymbolizer();
          ExternalGraphic eg = sf.createExternalGraphic("http://foo.com/invalid_or_missing_image_url", null);
          symb.getGraphic().graphicalSymbols().add(eg);
          
-         IconStyle2D icon = (IconStyle2D) sld.createPointStyle(feature, symb, range);
-         assertNull(icon);
+         Style2D icon = sld.createPointStyle(feature, symb, range);
+         assertNotNull(icon);
      }
 }

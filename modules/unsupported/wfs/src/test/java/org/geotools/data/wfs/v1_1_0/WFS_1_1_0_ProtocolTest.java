@@ -125,7 +125,7 @@ public class WFS_1_1_0_ProtocolTest {
         try {
             InputStream badData = new ByteArrayInputStream(new byte[1024]);
             HTTPClient connFac = new SimpleHttpClient();
-            new WFS_1_1_0_Protocol(badData, connFac, null);
+            new WFS_1_1_0_Protocol(badData, connFac, null, null);
             fail("Excpected IOException as a capabilities document was not provided");
         } catch (IOException e) {
             assertTrue(true);
@@ -702,7 +702,7 @@ public class WFS_1_1_0_ProtocolTest {
      * int featureHits = wfs.getFeatureHits(query); assertEquals(-1, featureHits); }
      */
 
-/**
+    /**
      * Test method for {@link WFS_1_1_0_Protocol#issueGetFeatureGET(net.opengis.wfs.GetFeatureType, Map)
      * 
      * @throws IOException
@@ -717,10 +717,7 @@ public class WFS_1_1_0_ProtocolTest {
 
         TestHttpProtocol mockHttp = new TestHttpProtocol(httpResponse);
 
-        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp);
-
-        WFSStrategy strategy = new GeoServerStrategy();
-        wfs.setStrategy(strategy);
+        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp, new GeoServerStrategy());
 
         Query query = new Query(GEOS_ARCHSITES.FEATURETYPENAME);
         GetFeature getFeature = new GetFeatureQueryAdapter(query, defaultWfs11OutputFormat,
@@ -751,6 +748,54 @@ public class WFS_1_1_0_ProtocolTest {
         assertNull(kvp.get("FILTER"));
     }
 
+    /**
+     * Test method for {@link WFS_1_1_0_Protocol#issueGetFeatureGET(net.opengis.wfs.GetFeatureType, Map)
+     * for resultType=hits.
+     * 
+     * @throws IOException
+     */
+    @Test
+    public void testIssueGetFeature_GET_HITS() throws IOException {
+        final InputStream responseContent = TestData.openStream(this, GEOS_ARCHSITES.DATA);
+
+        final TestHttpResponse httpResponse;
+        final String defaultWfs11OutputFormat = "text/xml; subtype=gml/3.1.1";
+        httpResponse = new TestHttpResponse(defaultWfs11OutputFormat, "UTF-16", responseContent);
+
+        TestHttpProtocol mockHttp = new TestHttpProtocol(httpResponse);
+
+        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp, new GeoServerStrategy());
+
+        Query query = new Query(GEOS_ARCHSITES.FEATURETYPENAME);
+        GetFeature getFeature = new GetFeatureQueryAdapter(query, defaultWfs11OutputFormat,
+                "EPSG:4326", ResultType.HITS);
+
+        WFSResponse response;
+
+        response = wfs.issueGetFeatureGET(getFeature);
+
+        assertNotNull(response);
+        assertEquals(defaultWfs11OutputFormat, response.getContentType());
+        assertNotNull(response.getInputStream());
+        assertEquals(Charset.forName("UTF-16"), response.getCharacterEncoding());
+
+        URL baseUrl = mockHttp.targetUrl;
+        assertNotNull(baseUrl);
+        Map<String, String> kvp = requestKvp(baseUrl);
+        assertTrue(baseUrl.toExternalForm().startsWith("http://localhost:8080/geoserver/wfs?"));
+        assertEquals("WFS", kvp.get("SERVICE"));
+        assertEquals("1.1.0", kvp.get("VERSION"));
+        assertEquals("GetFeature", kvp.get("REQUEST"));
+        assertEquals(GEOS_ARCHSITES.FEATURETYPENAME, kvp.get("TYPENAME"));
+        assertEquals(defaultWfs11OutputFormat, kvp.get("OUTPUTFORMAT"));
+        assertEquals("hits", kvp.get("RESULTTYPE"));
+        assertNotNull(kvp.get("SRSNAME"));
+        assertNull(kvp.get("PROPERTYNAME"));
+        assertNull(kvp.get("MAXFEATURES"));
+        assertNull(kvp.get("FEATUREID"));
+        assertNull(kvp.get("FILTER"));
+    }
+
     @Test
     public void testIssueGetFeature_GET_OptionalParameters() throws Exception {
 
@@ -761,7 +806,7 @@ public class WFS_1_1_0_ProtocolTest {
         httpResponse = new TestHttpResponse(defaultWfs11OutputFormat, "UTF-16", responseContent);
 
         TestHttpProtocol mockHttp = new TestHttpProtocol(httpResponse);
-        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp);
+        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp, new GeoServerStrategy());
 
         Query query = new Query(GEOS_ARCHSITES.FEATURETYPENAME);
         query.setMaxFeatures(1000);
@@ -773,8 +818,6 @@ public class WFS_1_1_0_ProtocolTest {
         query.setFilter(filter);
 
         WFSResponse response;
-        WFSStrategy strategy = new GeoServerStrategy();
-        wfs.setStrategy(strategy);
 
         wfs.setDescribeFeatureTypeURLOverride(TestData.url(this, GEOS_ARCHSITES.SCHEMA));
 
@@ -835,10 +878,7 @@ public class WFS_1_1_0_ProtocolTest {
         httpResponse = new TestHttpResponse(defaultWfs11OutputFormat, "UTF-16", responseContent);
 
         TestHttpProtocol mockHttp = new TestHttpProtocol(httpResponse);
-        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp);
-
-        WFSStrategy strategy = new GeoServerStrategy();
-        wfs.setStrategy(strategy);
+        createTestProtocol(GEOS_ARCHSITES.CAPABILITIES, mockHttp, new GeoServerStrategy());
 
         Query query = new Query(GEOS_ARCHSITES.FEATURETYPENAME);
         GetFeature getFeature = new GetFeatureQueryAdapter(query, defaultWfs11OutputFormat,

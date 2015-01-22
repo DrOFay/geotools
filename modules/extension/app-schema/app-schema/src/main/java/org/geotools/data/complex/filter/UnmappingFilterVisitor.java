@@ -71,7 +71,6 @@ import org.opengis.filter.expression.PropertyName;
 import org.opengis.filter.expression.Subtract;
 import org.opengis.filter.identity.Identifier;
 import org.opengis.filter.spatial.BBOX;
-import org.opengis.filter.spatial.BBOX3D;
 import org.opengis.filter.spatial.Beyond;
 import org.opengis.filter.spatial.BinarySpatialOperator;
 import org.opengis.filter.spatial.Contains;
@@ -199,10 +198,13 @@ public class UnmappingFilterVisitor implements org.opengis.filter.FilterVisitor,
         int index = 0;
         for (Iterator lefts = leftExpressions.iterator(); lefts.hasNext();) {
             left = (Expression) lefts.next();
+            int rightIndex = 0;
             for (Iterator rights = rightExpressions.iterator(); rights.hasNext();) {
+                index = index + rightIndex;
                 right = (Expression) rights.next();
                 product[index][0] = left;
                 product[index][1] = right;
+                rightIndex++;
             }
             index++;
         }
@@ -806,8 +808,7 @@ public class UnmappingFilterVisitor implements org.opengis.filter.FilterVisitor,
         return combinedExpressions;
     }
 
-    public Object visit(PropertyName expr, Object arg1) {
-
+    public List<Expression> visit(PropertyName expr, Object arg1) {
         String targetXPath = expr.getPropertyName();
         NamespaceSupport namespaces = mappings.getNamespaces();
         AttributeDescriptor root = mappings.getTargetFeature();
@@ -816,7 +817,7 @@ public class UnmappingFilterVisitor implements org.opengis.filter.FilterVisitor,
         // break into single steps
         StepList simplifiedSteps = XPath.steps(root, targetXPath, namespaces);
 
-        List<Expression> matchingMappings = mappings.findMappingsFor(simplifiedSteps);
+        List<Expression> matchingMappings = mappings.findMappingsFor(simplifiedSteps, false);
 
         if (!nestedMappings.isEmpty()) {
             // means some attributes are mapped separately in feature chaining

@@ -55,6 +55,7 @@ DataStore plugins:
    
    arcsde
    shape
+   ogr
    pregeneralized
    property
 
@@ -69,8 +70,8 @@ Unsupported plugins:
    edigeo
    excel
    georest
-   ogr
    sfs
    wfs
    wfs-ng
    vpf
+   kml

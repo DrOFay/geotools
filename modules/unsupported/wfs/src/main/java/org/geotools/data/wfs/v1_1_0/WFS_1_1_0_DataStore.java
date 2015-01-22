@@ -23,9 +23,11 @@ import java.io.IOException;
 import java.net.URI;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,6 +68,7 @@ import org.geotools.factory.CommonFactoryFinder;
 import org.geotools.feature.NameImpl;
 import org.geotools.feature.SchemaException;
 import org.geotools.feature.simple.SimpleFeatureTypeBuilder;
+import org.geotools.filter.FilterAttributeExtractor;
 import org.geotools.filter.spatial.ReprojectingFilterVisitor;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.gml2.bindings.GML2EncodingUtils;
@@ -130,6 +133,8 @@ public final class WFS_1_1_0_DataStore implements WFSDataStore {
     private String axisOrderFilter = AXIS_ORDER_COMPLIANT;
     
     private String outputFormat = null;
+    
+    private Map<String, String> mappedURIs = new HashMap<String, String>();
 
     /**
      * The WFS capabilities document.
@@ -144,6 +149,17 @@ public final class WFS_1_1_0_DataStore implements WFSDataStore {
         byTypeNameTypes = Collections.synchronizedMap(new HashMap<String, SimpleFeatureType>());
         maxFeaturesHardLimit = Integer.valueOf(0); // not set
     }
+    
+    
+
+    /**
+     * @param mappedURIs the mappedURIs to set
+     */
+    public void setMappedURIs(Map<String, String> mappedURIs) {
+        this.mappedURIs = mappedURIs;
+    }
+
+
 
     /**
      * Configure expected axis order for output and filters.
@@ -388,10 +404,21 @@ public final class WFS_1_1_0_DataStore implements WFSDataStore {
         return invertXY;
     }
 
-    private Query createNewQuery(Query model, Filter filter) {
+    private Query createNewQuery(Query model, Filter filter, Filter postFilter) {
         Query query = new Query(model);
         query.setFilter(filter);
         query.setMaxFeatures(getMaxFeatures(query));
+        if(postFilter != Filter.INCLUDE && query.getPropertyNames() != Query.ALL_NAMES) {
+            // we need to include the attributes used in the post filter too
+            FilterAttributeExtractor fae = new FilterAttributeExtractor();
+            postFilter.accept(fae, null);
+            String[] attributeNames = fae.getAttributeNames();
+            String[] queryProperties = query.getPropertyNames();
+            LinkedHashSet<String> atts = new LinkedHashSet<String>();
+            atts.addAll(Arrays.asList(queryProperties));
+            atts.addAll(Arrays.asList(attributeNames));
+            query.setPropertyNames((String[]) atts.toArray(new String[atts.size()]));
+        } 
         return query;
     }
     
@@ -413,13 +440,13 @@ public final class WFS_1_1_0_DataStore implements WFSDataStore {
             LOGGER.fine("Supported filter:  " + supportedFilter);
             LOGGER.fine("Unupported filter: " + postFilter);
         }
-        query = createNewQuery(query, supportedFilter);
+        query = createNewQuery(query, supportedFilter, postFilter);
 
         final CoordinateReferenceSystem queryCrs = query.getCoordinateSystem();
 
         WFSResponse response = executeGetFeatures(query, transaction, ResultType.RESULTS);
 
-        Object result = WFSExtensions.process(this, response);
+        Object result = WFSExtensions.process(this, response, mappedURIs);
 
         GetFeatureParser parser;
         if (result instanceof WFSException) {
@@ -868,11 +895,11 @@ public final class WFS_1_1_0_DataStore implements WFSDataStore {
 
         // WFSProtocol.splitFilter has simplified and validated my filters
         // so I create a new Query using these supported filters
-        query = createNewQuery(query, filters[0]);
+        query = createNewQuery(query, filters[0], filters[1]);
         
         WFSResponse response = executeGetFeatures(query, Transaction.AUTO_COMMIT, ResultType.HITS);
 
-        Object process = WFSExtensions.process(this, response);
+        Object process = WFSExtensions.process(this, response, mappedURIs);
         if (!(process instanceof GetFeatureParser)) {
             LOGGER.info("GetFeature with resultType=hits resulted in " + process);
         }
@@ -1011,4 +1038,13 @@ public final class WFS_1_1_0_DataStore implements WFSDataStore {
         }
     }
 
+    @Override
+    public void removeSchema(String typeName) throws IOException {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void removeSchema(Name typeName) throws IOException {
+        throw new UnsupportedOperationException();
+    }
  }

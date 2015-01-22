@@ -2,7 +2,7 @@
  *    GeoTools - The Open Source Java GIS Toolkit
  *    http://geotools.org
  * 
- *    (C) 2004-2008, Open Source Geospatial Foundation (OSGeo)
+ *    (C) 2004-2014, Open Source Geospatial Foundation (OSGeo)
  *
  *    This library is free software; you can redistribute it and/or
  *    modify it under the terms of the GNU Lesser General Public
@@ -17,6 +17,7 @@
 package org.geotools.renderer.lite;
 
 import java.awt.AlphaComposite;
+import java.awt.Composite;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -49,19 +50,16 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import javax.media.jai.Interpolation;
-import javax.media.jai.JAI;
 import javax.media.jai.PlanarImage;
 
 import org.geotools.coverage.grid.GridCoverage2D;
 import org.geotools.coverage.grid.GridEnvelope2D;
 import org.geotools.coverage.grid.GridGeometry2D;
-import org.geotools.coverage.grid.io.AbstractGridFormat;
+import org.geotools.coverage.grid.InvalidGridGeometryException;
 import org.geotools.coverage.grid.io.GridCoverage2DReader;
-import org.geotools.coverage.processing.CoverageProcessor;
 import org.geotools.data.DataUtilities;
 import org.geotools.data.FeatureSource;
 import org.geotools.data.Query;
-import org.geotools.data.crs.ForceCoordinateSystemFeatureResults;
 import org.geotools.data.memory.CollectionSource;
 import org.geotools.data.simple.SimpleFeatureCollection;
 import org.geotools.factory.CommonFactoryFinder;
@@ -69,16 +67,12 @@ import org.geotools.factory.Hints;
 import org.geotools.feature.FeatureCollection;
 import org.geotools.feature.FeatureIterator;
 import org.geotools.feature.FeatureTypes;
-import org.geotools.feature.SchemaException;
 import org.geotools.filter.IllegalFilterException;
 import org.geotools.filter.function.GeometryTransformationVisitor;
-import org.geotools.filter.function.RenderingTransformation;
 import org.geotools.filter.spatial.DefaultCRSFilterVisitor;
 import org.geotools.filter.spatial.ReprojectingFilterVisitor;
-import org.geotools.filter.visitor.ExtractBoundsFilterVisitor;
 import org.geotools.filter.visitor.SimplifyingFilterVisitor;
 import org.geotools.filter.visitor.SpatialFilterVisitor;
-import org.geotools.geometry.GeneralEnvelope;
 import org.geotools.geometry.jts.Decimator;
 import org.geotools.geometry.jts.GeometryClipper;
 import org.geotools.geometry.jts.JTS;
@@ -92,7 +86,6 @@ import org.geotools.map.MapContent;
 import org.geotools.map.MapContext;
 import org.geotools.map.MapLayer;
 import org.geotools.map.StyleLayer;
-import org.geotools.parameter.Parameter;
 import org.geotools.referencing.CRS;
 import org.geotools.referencing.crs.DefaultGeographicCRS;
 import org.geotools.referencing.operation.matrix.XAffineTransform;
@@ -106,6 +99,7 @@ import org.geotools.renderer.crs.ProjectionHandler;
 import org.geotools.renderer.crs.ProjectionHandlerFinder;
 import org.geotools.renderer.label.LabelCacheImpl;
 import org.geotools.renderer.label.LabelCacheImpl.LabelRenderingMode;
+import org.geotools.renderer.lite.gridcoverage2d.GridCoverageReaderHelper;
 import org.geotools.renderer.lite.gridcoverage2d.GridCoverageRenderer;
 import org.geotools.renderer.style.SLDStyleFactory;
 import org.geotools.renderer.style.Style2D;
@@ -124,7 +118,6 @@ import org.geotools.styling.visitor.DpiRescaleStyleVisitor;
 import org.geotools.styling.visitor.DuplicatingStyleVisitor;
 import org.geotools.styling.visitor.UomRescaleStyleVisitor;
 import org.geotools.util.NumberRange;
-import org.opengis.coverage.processing.Operation;
 import org.opengis.coverage.processing.OperationNotFoundException;
 import org.opengis.feature.Feature;
 import org.opengis.feature.simple.SimpleFeature;
@@ -138,7 +131,6 @@ import org.opengis.filter.FilterFactory2;
 import org.opengis.filter.expression.Expression;
 import org.opengis.filter.expression.PropertyName;
 import org.opengis.parameter.GeneralParameterValue;
-import org.opengis.parameter.ParameterValueGroup;
 import org.opengis.referencing.FactoryException;
 import org.opengis.referencing.NoSuchAuthorityCodeException;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
@@ -182,6 +174,9 @@ import com.vividsolutions.jts.geom.Point;
  * @version $Id$
  */
 public class StreamingRenderer implements GTRenderer {
+
+    private static final int REPROJECTION_RASTER_GUTTER = 10;
+
     private final static int defaultMaxFiltersToSendToDatastore = 5; // default
 
     /**
@@ -202,6 +197,12 @@ public class StreamingRenderer implements GTRenderer {
      */
     public static final String SCALE_OGC = "OGC";
 
+    /**
+     * The rendering buffer grows the query area to account for features that are contributing to
+     * the requested area due to their large symbolizer, or long label
+     */
+    public static final String RENDERING_BUFFER = "renderingBuffer";
+
     /** Tolerance used to compare doubles for equality */
     private static final double TOLERANCE = 1e-6;
 
@@ -218,13 +219,6 @@ public class StreamingRenderer implements GTRenderer {
     private final static PropertyName paramsPropertyName = filterFactory.property("params");
 
     private final static PropertyName defaultGeometryPropertyName = filterFactory.property("");
-
-    // support for crop
-    private static final CoverageProcessor PROCESSOR = CoverageProcessor.getInstance();
-    
-    // the crop and scale operations
-    private static final Operation CROP = PROCESSOR.getOperation("CoverageCrop");
-    private static final Operation SCALE = PROCESSOR.getOperation("Scale");
 
     /**
      * The MapContent instance which contains the layers and the bounding box which needs to be
@@ -409,6 +403,11 @@ public class StreamingRenderer implements GTRenderer {
     private ExecutorService threadPool;
 
     private PainterThread painterThread;
+
+    /**
+     * The meta buffer for the current layer
+     */
+    private int metaBuffer;
 
     /**
      * Creates a new instance of LiteRenderer without a context. Use it only to
@@ -765,12 +764,6 @@ public class StreamingRenderer implements GTRenderer {
                     mapExtent.getCoordinateReferenceSystem()); 
         }
 
-        // enable advanced projection handling with the updated map extent
-        if(isAdvancedProjectionHandlingEnabled()) {
-            // get the projection handler and set a tentative envelope
-            projectionHandler = ProjectionHandlerFinder.getHandler(mapExtent, isMapWrappingEnabled());
-        }
-        
         // Setup the secondary painting thread
         requests = getRequestsQueue();
         painterThread = new PainterThread(requests);
@@ -786,54 +779,78 @@ public class StreamingRenderer implements GTRenderer {
                 throw new IllegalStateException("Cannot call paint, you did not set a MapContent in this renderer");
             }
             
-            // ////////////////////////////////////////////////////////////////////
-            //
-            // Processing all the map layers in the context using the accompaining
-            // styles
-            //
-            // ////////////////////////////////////////////////////////////////////
-            labelCache.start();
-            if(labelCache instanceof LabelCacheImpl) {
-                ((LabelCacheImpl) labelCache).setLabelRenderingMode(LabelRenderingMode.valueOf(getTextRenderingMethod()));
-            }
-            final int layersNumber = mapContent.layers().size();
-            for (int i = 0; i < layersNumber; i++) // DJB: for each layer (ie. one
-            {
-                Layer layer = mapContent.layers().get(i);
-    
-                if (!layer.isVisible()) {
-                    // Only render layer when layer is visible
-                    continue;
-                }
-    
-                if (renderingStopRequested) {
-                    return;
-                }
-                labelCache.startLayer(i+"");
+            // split over multiple map contents, one per composition base
+            List<CompositingGroup> compositingGroups = CompositingGroup.splitOnCompositingBase(
+                    graphics, paintArea, mapContent);
+            
+            int layerId = 0;
+            for (CompositingGroup compositingGroup : compositingGroups) {
+                MapContent currentMapContent = compositingGroup.mapContent;
+                Graphics2D compositingGraphic = compositingGroup.graphics;
                 
-                if (layer instanceof DirectLayer) {
-                    RenderingRequest request = new RenderDirectLayerRequest(
-                            graphics, (DirectLayer) layer);
+                // ////////////////////////////////////////////////////////////////////
+                //
+                // Processing all the map layers in the context using the accompaining
+                // styles
+                //
+                // ////////////////////////////////////////////////////////////////////
+                labelCache.start();
+                if(labelCache instanceof LabelCacheImpl) {
+                    ((LabelCacheImpl) labelCache).setLabelRenderingMode(LabelRenderingMode.valueOf(getTextRenderingMethod()));
+                }
+                
+                for (Layer layer : currentMapContent.layers()) {
+                    layerId++;
+                    if (!layer.isVisible()) {
+                        // Only render layer when layer is visible
+                        continue;
+                    }
+        
+                    if (renderingStopRequested) {
+                        return;
+                    }
+                    labelCache.startLayer(String.valueOf(layerId));
+                    
+                    if (layer instanceof DirectLayer) {
+                        RenderingRequest request = new RenderDirectLayerRequest(compositingGraphic,
+                                (DirectLayer) layer);
+                        try {
+                            requests.put(request);
+                        } catch (InterruptedException e) {
+                            fireErrorEvent(e);
+                        }
+                        
+                    } else {
+                        MapLayer currLayer = new MapLayer(layer);
+                        try {
+
+                            // extract the feature type stylers from the style object
+                            // and process them
+                            processStylers(compositingGraphic, currLayer, worldToScreenTransform,
+                                    destinationCrs, mapExtent, screenSize, layerId + "");
+                        } catch (Throwable t) {
+                            fireErrorEvent(t);
+                        }
+                    }
+        
+                    labelCache.endLayer(String.valueOf(layerId), graphics, screenSize);
+                }
+                
+                // have we been painting on a back buffer? If so, merge on the main graphic
+                if (compositingGraphic instanceof DelayedBackbufferGraphic) {
+                    DelayedBackbufferGraphic delayedGraphic = (DelayedBackbufferGraphic) compositingGraphic;
+                    RenderingRequest request = new MargeCompositingGroupRequest(graphics,
+                            compositingGroup);
                     try {
                         requests.put(request);
                     } catch (InterruptedException e) {
                         fireErrorEvent(e);
                     }
-                    
-                } else {
-                    MapLayer currLayer = new MapLayer(layer);
-                    try {
-
-                        // extract the feature type stylers from the style object
-                        // and process them
-                        processStylers(graphics, currLayer, worldToScreenTransform,
-                                destinationCrs, mapExtent, screenSize, i + "");
-                    } catch (Throwable t) {
-                        fireErrorEvent(t);
-                    }
                 }
-    
-                labelCache.endLayer(i+"", graphics, screenSize);
+                // the compositing group has its own map content, clones of the original one,
+                // they need to be disposed to avoid nagging messages (not that disposing here
+                // does any good...)
+                compositingGroup.mapContent.dispose();
             }
         } finally {
             try {
@@ -992,27 +1009,35 @@ public class StreamingRenderer implements GTRenderer {
             Envelope mapArea, CoordinateReferenceSystem mapCRS,
             CoordinateReferenceSystem featCrs, Rectangle screenSize,
             GeometryDescriptor geometryAttribute,
-            AffineTransform worldToScreenTransform)
+            AffineTransform worldToScreenTransform, boolean renderingTransformation)
             throws IllegalFilterException, IOException, FactoryException {
         Query query = new Query(Query.ALL);
         Filter filter = null;
         
-        LiteFeatureTypeStyle[] styles = (LiteFeatureTypeStyle[]) styleList.toArray(new LiteFeatureTypeStyle[styleList.size()]);
+        LiteFeatureTypeStyle[] styles = styleList.toArray(new LiteFeatureTypeStyle[styleList.size()]);
 
         // if map extent are not already expanded by a constant buffer, try to compute a layer
         // specific one based on stroke widths
         if(getRenderingBuffer() == 0) {
-            int buffer = findRenderingBuffer(styles);
-            if (buffer > 0) {
+            metaBuffer = findRenderingBuffer(styles);
+            if (metaBuffer > 0) {
                 mapArea = expandEnvelope(mapArea, worldToScreenTransform,
-                        buffer);
-                LOGGER.fine("Expanding rendering area by " + buffer 
+                        metaBuffer);
+                LOGGER.fine("Expanding rendering area by " + metaBuffer 
                         + " pixels to consider stroke width");
+                
+                // expand the screenmaps by the meta buffer, otherwise we'll throw away geomtries
+                // that sit outside of the map, but whose symbolizer may contribute to it
+                for (LiteFeatureTypeStyle lfts : styles) {
+                    if(lfts.screenMap != null) {
+                        lfts.screenMap = new ScreenMap(lfts.screenMap, metaBuffer);
+                    }
+                }
             }
         }
         
         // take care of rendering transforms
-        expandEnvelopeByTransformations(styles, new ReferencedEnvelope(mapArea, mapCRS));
+        mapArea = expandEnvelopeByTransformations(styles, new ReferencedEnvelope(mapArea, mapCRS));
 
         // build a list of attributes used in the rendering
         List<PropertyName> attributes;
@@ -1023,22 +1048,24 @@ public class StreamingRenderer implements GTRenderer {
         }
 
         ReferencedEnvelope envelope = new ReferencedEnvelope(mapArea, mapCRS);
-        // update the current rendering extent
-        mapExtent = envelope;
         // see what attributes we really need by exploring the styles
         // for testing purposes we have a null case -->
-
         try {
             // Then create the geometry filters. We have to create one for
             // each geometric attribute used during the rendering as the
             // feature may have more than one and the styles could use non
             // default geometric ones
-            List<ReferencedEnvelope> envelopes;
-            if (projectionHandler != null) {
-                // update the envelope with the one eventually grown by the rendering buffer
-                projectionHandler.setRenderingEnvelope(envelope);
-                envelopes = projectionHandler.getQueryEnvelopes(featCrs);
-            } else {
+            List<ReferencedEnvelope> envelopes = null;
+            // enable advanced projection handling with the updated map extent
+            if (isAdvancedProjectionHandlingEnabled()) {
+                // get the projection handler and set a tentative envelope
+                projectionHandler = ProjectionHandlerFinder.getHandler(envelope, featCrs,
+                        isMapWrappingEnabled());
+                if (projectionHandler != null) {
+                    envelopes = projectionHandler.getQueryEnvelopes();
+                }
+            }
+            if(envelopes == null) {
                 if (mapCRS != null && featCrs != null && !CRS.equalsIgnoreMetadata(featCrs, mapCRS)) {
                     envelopes = Collections.singletonList(envelope.transform(featCrs, true, 10));
                 } else {
@@ -1112,16 +1139,25 @@ public class StreamingRenderer implements GTRenderer {
                     }
                 }
             
-                // ... if possible we let the datastore do the generalization
-                if(fsHints.contains(Hints.GEOMETRY_SIMPLIFICATION)) {
-                    // good, we don't need to perform in memory generalization, the datastore
-                    // does it all for us
-                    hints.put(Hints.GEOMETRY_SIMPLIFICATION, distance);
-                    inMemoryGeneralization = false;
-                } else if(fsHints.contains(Hints.GEOMETRY_DISTANCE)) {
-                    // in this case the datastore can get us close, but we can still
-                    // perform some in memory generalization
-                    hints.put(Hints.GEOMETRY_DISTANCE, distance);
+                if(renderingTransformation) {
+                    // the RT might need valid geometries, we can at most apply a topology
+                    // preserving generalization
+                    if(fsHints.contains(Hints.GEOMETRY_GENERALIZATION)) {
+                        hints.put(Hints.GEOMETRY_GENERALIZATION, distance);
+                        inMemoryGeneralization = false;
+                    }
+                } else {
+                    // ... if possible we let the datastore do the generalization
+                    if(fsHints.contains(Hints.GEOMETRY_SIMPLIFICATION)) {
+                        // good, we don't need to perform in memory generalization, the datastore
+                        // does it all for us
+                        hints.put(Hints.GEOMETRY_SIMPLIFICATION, distance);
+                        inMemoryGeneralization = false;
+                    } else if(fsHints.contains(Hints.GEOMETRY_DISTANCE)) {
+                        // in this case the datastore can get us close, but we can still
+                        // perform some in memory generalization
+                        hints.put(Hints.GEOMETRY_DISTANCE, distance);
+                    }
                 }
             }
         } catch(Exception e) {
@@ -1339,7 +1375,7 @@ public class StreamingRenderer implements GTRenderer {
             // or together all the filters
             org.opengis.filter.Filter ruleFiltersCombined;
             if (filtersToDS.size() == 1) {
-                ruleFiltersCombined = (Filter) filtersToDS.get(0);
+                ruleFiltersCombined = filtersToDS.get(0);
             } else {
                 ruleFiltersCombined = filterFactory.or(filtersToDS); 
             }
@@ -1471,7 +1507,7 @@ public class StreamingRenderer implements GTRenderer {
         }
 
         if(!rbe.isEstimateAccurate())
-            LOGGER.warning("Assuming rendering buffer = " + rbe.getBuffer() 
+            LOGGER.fine("Assuming rendering buffer = " + rbe.getBuffer() 
                     + ", but estimation is not accurate, you may want to set a buffer manually");
         
         // the actual amount we have to grow the rendering area by is half of the stroke/symbol sizes
@@ -1674,6 +1710,7 @@ public class StreamingRenderer implements GTRenderer {
         LiteFeatureTypeStyle lfts;
         BufferedImage image;
 
+        boolean foundComposite = false;
         for (FeatureTypeStyle fts : featureStyles) {
             if (typeDescription == null || typeDescription.toString().indexOf( fts.getFeatureTypeName() ) == -1) 
                 continue; 
@@ -1698,12 +1735,21 @@ public class StreamingRenderer implements GTRenderer {
             if ((ruleList.isEmpty()) && (elseRuleList.isEmpty()))
                 continue; 
 
+            // get the fts level composition, if any
+            Composite composite = SLDStyleFactory.getComposite(fts.getOptions());
+            foundComposite |= composite != null;
+
             // first fts, we can reuse the graphics directly
-            if (result.isEmpty() || !isOptimizedFTSRenderingEnabled()) {
+            if (!foundComposite && (result.isEmpty() || !isOptimizedFTSRenderingEnabled())) {
                 lfts = new LiteFeatureTypeStyle(graphics, ruleList, elseRuleList, fts.getTransformation());
             } else {
                 lfts = new LiteFeatureTypeStyle(new DelayedBackbufferGraphic(graphics, screenSize), 
                         ruleList, elseRuleList, fts.getTransformation());
+            }
+            lfts.composite = composite;
+            if (FeatureTypeStyle.VALUE_EVALUATION_MODE_FIRST.equals(fts.getOptions().get(
+                    FeatureTypeStyle.KEY_EVALUATION_MODE))) {
+                lfts.matchFirst = true;
             }
             result.add(lfts);
         }
@@ -1730,6 +1776,7 @@ public class StreamingRenderer implements GTRenderer {
         ArrayList<LiteFeatureTypeStyle> result = new ArrayList<LiteFeatureTypeStyle>();
 
         LiteFeatureTypeStyle lfts;
+        boolean foundComposite = false;
         for (FeatureTypeStyle fts : featureStyles) {
             if (isFeatureTypeStyleActive(ftype, fts)) {
                 // DJB: this FTS is compatible with this FT.
@@ -1741,19 +1788,31 @@ public class StreamingRenderer implements GTRenderer {
 
                 // if none, skip it
                 if ((ruleList.isEmpty()) && (elseRuleList.isEmpty()))
-                    continue; 
+                    continue;
 
-                // we can optimize this one!
-                if (result.isEmpty() || !isOptimizedFTSRenderingEnabled()) {
+                // get the fts level composition, if any
+                Composite composite = styleFactory.getComposite(fts.getOptions());
+                foundComposite |= composite != null;
+
+                // we can optimize this one and draw directly on the graphics, assuming
+                // there is no composition
+                if (!foundComposite && (result.isEmpty() || !isOptimizedFTSRenderingEnabled())) {
                     lfts = new LiteFeatureTypeStyle(graphics, ruleList,
                             elseRuleList, fts.getTransformation());
                 } else {
                     lfts = new LiteFeatureTypeStyle(new DelayedBackbufferGraphic(graphics, screenSize), 
                             ruleList, elseRuleList, fts.getTransformation());
                 }
+                lfts.composite = composite;
+                if (FeatureTypeStyle.VALUE_EVALUATION_MODE_FIRST.equals(fts.getOptions().get(
+                        FeatureTypeStyle.KEY_EVALUATION_MODE))) {
+                    lfts.matchFirst = true;
+                }
                 if (screenMapEnabled(lfts)) {
-                    lfts.screenMap = new ScreenMap(screenSize.x, screenSize.y, screenSize.width,
-                            screenSize.height);
+                    int renderingBuffer = getRenderingBuffer();
+                    lfts.screenMap = new ScreenMap(screenSize.x - renderingBuffer, screenSize.y
+                            - renderingBuffer, screenSize.width + renderingBuffer * 2,
+                            screenSize.height + renderingBuffer * 2);
                 }
                                                    
                 result.add(lfts);
@@ -1877,39 +1936,6 @@ public class StreamingRenderer implements GTRenderer {
     }
 
     /**
-     * Makes sure the feature collection generates the desired sourceCrs, this is mostly a workaround
-     * against feature sources generating feature collections without a CRS (which is fatal to
-     * the reprojection handling later in the code)
-     *  
-     * @param features
-     * @param sourceCrs
-     * @return FeatureCollection<SimpleFeatureType, SimpleFeature> that produces results with the correct CRS
-     */
-    private FeatureCollection prepFeatureCollection(FeatureCollection features, CoordinateReferenceSystem sourceCrs ) {
-        // this is the reader's CRS
-        CoordinateReferenceSystem rCS = null;
-        try {
-            rCS = features.getSchema().getGeometryDescriptor().getType().getCoordinateReferenceSystem();
-        } catch(NullPointerException e) {
-            // life sucks sometimes
-        }
-
-        if (rCS != sourceCrs && sourceCrs != null) {
-            // if the datastore is producing null CRS, we recode.
-            // if the datastore's CRS != real CRS, then we recode
-            if ((rCS == null) || !CRS.equalsIgnoreMetadata(rCS, sourceCrs)) {
-                // need to retag the features
-                try {
-                    return new ForceCoordinateSystemFeatureResults( (SimpleFeatureCollection) features, sourceCrs);
-                } catch (Exception ee) {
-                    LOGGER.log(Level.WARNING, ee.getLocalizedMessage(), ee);
-                }
-            }
-        }
-        return features;
-    }
-
-    /**
      * Applies each feature type styler in turn to all of the features. This
      * perhaps needs some explanation to make it absolutely clear.
      * featureStylers[0] is applied to all features before featureStylers[1] is
@@ -1998,30 +2024,67 @@ public class StreamingRenderer implements GTRenderer {
                 // ... assume we have to do the generalization, the query layer process will
                 // turn down the flag if we don't 
                 inMemoryGeneralization = true;
+                boolean hasTransformation = transform != null;
                 Query styleQuery = getStyleQuery(featureSource, schema,
                         uniform, mapArea, destinationCrs, sourceCrs, screenSize,
-                        geometryAttribute, at);
+                        geometryAttribute, at, hasTransformation);
                 Query definitionQuery = getDefinitionQuery(currLayer, featureSource, sourceCrs);
-                if(transform != null) {
+                if(hasTransformation) {
                     // prepare the stage for the raster transformations
-                    GridEnvelope2D ge = new GridEnvelope2D(screenSize);
-                    ReferencedEnvelope re = new ReferencedEnvelope(mapArea, destinationCrs);
-                    GridGeometry2D gridGeometry = new GridGeometry2D(ge, re);
+                    GridGeometry2D gridGeometry = getRasterGridGeometry(destinationCrs, sourceCrs);
                     // vector transformation wise, we have to account for two separate queries,
                     // the one attached to the layer and then one coming from SLD.
                     // The first source attributes, the latter talks tx output attributes
                     // so they have to be applied before and after the transformation respectively
                     
-                    features = applyRenderingTransformation(transform, featureSource, definitionQuery, 
-                            styleQuery, gridGeometry, sourceCrs);
-                    if(features == null) {
+                    RenderingTransformationHelper helper = new RenderingTransformationHelper() {
+                        
+                        @Override
+                        protected GridCoverage2D readCoverage(GridCoverage2DReader reader, Object params, GridGeometry2D readGG) throws IOException {
+                            GeneralParameterValue[] readParams = (GeneralParameterValue[]) params;
+                            Interpolation interpolation = getRenderingInterpolation();
+                            GridCoverageReaderHelper helper;
+                            try {
+                                helper = new GridCoverageReaderHelper(reader,
+                                        readGG.getGridRange2D(),
+                                        ReferencedEnvelope.reference(readGG.getEnvelope2D()),
+                                        interpolation);
+                                return helper.readCoverage(readParams);
+                            } catch (InvalidGridGeometryException | FactoryException e) {
+                                throw new IOException("Failure reading the coverage", e);
+                            }
+
+                        }
+                    };
+                    
+                    Object result = helper.applyRenderingTransformation(transform, featureSource, definitionQuery, 
+                            styleQuery, gridGeometry, sourceCrs, java2dHints);
+                    if(result == null) {
                         return;
-                    }
+                    } else if (result instanceof FeatureCollection) {
+                        features = (FeatureCollection) result;
+                    } else if (result instanceof GridCoverage2D) {
+                        GridCoverage2D coverage = (GridCoverage2D) result;
+                        // we only avoid disposing if the input was a in memory GridCovereage2D
+                        if((schema instanceof SimpleFeatureType && !FeatureUtilities.isWrappedCoverage((SimpleFeatureType) schema))) {
+                            coverage = new DisposableGridCoverage(coverage);
+                        }
+                        features = FeatureUtilities.wrapGridCoverage(coverage);
+                    } else if (result instanceof GridCoverage2DReader) {
+                        features = FeatureUtilities.wrapGridCoverageReader(
+                                (GridCoverage2DReader) result, null);
+                    } else {
+                        throw new IllegalArgumentException(
+                                "Don't know how to handle the results of the transformation, "
+                                        + "the supported result types are FeatureCollection, GridCoverage2D "
+                                        + "and GridCoverage2DReader, but we got: "
+                                        + result.getClass());
+                    }                    
                 } else {
                     Query mixed = DataUtilities.mixQueries(definitionQuery, styleQuery, null);
                     checkAttributeExistence(featureSource.getSchema(), mixed);
                     features = featureSource.getFeatures(mixed);
-                    features = prepFeatureCollection(features, sourceCrs);
+                    features = RendererUtilities.fixFeatureCollectionReferencing(features, sourceCrs);
                 }
 
                 // HACK HACK HACK
@@ -2038,7 +2101,7 @@ public class StreamingRenderer implements GTRenderer {
                 }
 
                 // finally, perform rendering
-                if(isOptimizedFTSRenderingEnabled() && lfts.size() > 1) {
+                if (isOptimizedFTSRenderingEnabled() && lfts.size() > 1) {
                     drawOptimized(graphics, currLayer, at, destinationCrs, layerId, null, features,
                             scaleRange, uniform);
                 } else {
@@ -2072,6 +2135,7 @@ public class StreamingRenderer implements GTRenderer {
     
     /**
      * Classify a List of LiteFeatureTypeStyle objects by Transformation.
+     * 
      * @param lfts A List of LiteFeatureTypeStyles
      * @return A List of List of LiteFeatureTypeStyles
      */
@@ -2121,162 +2185,6 @@ public class StreamingRenderer implements GTRenderer {
                         ")");
                 }
             }
-        }
-    }
-
-    FeatureCollection applyRenderingTransformation(Expression transformation,
-            FeatureSource featureSource, Query layerQuery, Query renderingQuery, 
-            GridGeometry2D gridGeometry, CoordinateReferenceSystem sourceCrs) throws IOException, SchemaException, TransformException, FactoryException  {
-        Object result = null;
-        
-        // check if it's a wrapper coverage or a wrapped reader
-        FeatureType schema = featureSource.getSchema();
-        boolean isRasterData = false;
-        if(schema instanceof SimpleFeatureType) {
-            SimpleFeatureType simpleSchema = (SimpleFeatureType) schema;
-            GridCoverage2D coverage = null;
-            if(FeatureUtilities.isWrappedCoverage(simpleSchema) || FeatureUtilities.isWrappedCoverageReader(simpleSchema)) {
-                isRasterData = true;
-
-                // get the desired grid geometry
-                GridGeometry2D readGG = gridGeometry;
-                if(transformation instanceof RenderingTransformation) {
-                    RenderingTransformation tx = (RenderingTransformation) transformation;
-                    readGG = (GridGeometry2D) tx.invertGridGeometry(renderingQuery, gridGeometry);
-                    // TODO: override the read params and force this grid geometry, or something
-                    // similar to this (like passing it as a param to readCoverage
-                }
-                
-                FeatureCollection<?,?> sample = featureSource.getFeatures();
-                Feature gridWrapper = DataUtilities.first( sample );
-                
-                if(FeatureUtilities.isWrappedCoverageReader(simpleSchema)) {
-                    final Object params = paramsPropertyName.evaluate(gridWrapper);
-                    final GridCoverage2DReader reader = (GridCoverage2DReader) gridPropertyName.evaluate(gridWrapper);
-                    // don't read more than the native resolution (in case we are oversampling)
-                    if(CRS.equalsIgnoreMetadata(reader.getCoordinateReferenceSystem(), gridGeometry.getCoordinateReferenceSystem())) {
-                         MathTransform g2w = reader.getOriginalGridToWorld(PixelInCell.CELL_CENTER);
-                         if(g2w instanceof AffineTransform2D && readGG.getGridToCRS2D() instanceof AffineTransform2D) {
-                             AffineTransform2D atOriginal = (AffineTransform2D) g2w;
-                             AffineTransform2D atMap = (AffineTransform2D) readGG.getGridToCRS2D(); 
-                             if(XAffineTransform.getScale(atMap) < XAffineTransform.getScale(atOriginal)) {
-                                 // we need to go trough some convoluted code to make sure the new grid geometry
-                                 // has at least one pixel
-                                 
-                                 org.opengis.geometry.Envelope worldEnvelope = gridGeometry.getEnvelope();
-                                 GeneralEnvelope transformed = org.geotools.referencing.CRS.transform(atOriginal.inverse(), worldEnvelope);
-                                 int minx = (int) Math.floor(transformed.getMinimum(0));
-                                 int miny = (int) Math.floor(transformed.getMinimum(1));
-                                 int maxx = (int) Math.ceil(transformed.getMaximum(0));
-                                 int maxy = (int) Math.ceil(transformed.getMaximum(1));
-                                 Rectangle rect = new Rectangle(minx, miny, (maxx - minx), (maxy - miny));
-                                 GridEnvelope2D gridEnvelope = new GridEnvelope2D(rect);
-                                 readGG = new GridGeometry2D(gridEnvelope, atOriginal, worldEnvelope.getCoordinateReferenceSystem());
-                             }
-                         }
-                    }
-                    coverage = readCoverage(reader, params, readGG);
-                } else {
-                    coverage = (GridCoverage2D) gridPropertyName.evaluate(gridWrapper);
-                }
-                
-                // readers will return null if there is no coverage in the area
-                if(coverage != null) {
-                    if(readGG != null) {
-                        // Crop will fail if we try to crop outside of the coverage area
-                        ReferencedEnvelope renderingEnvelope = new ReferencedEnvelope(readGG.getEnvelope());
-                        CoordinateReferenceSystem coverageCRS = coverage.getCoordinateReferenceSystem2D();
-                        if(!CRS.equalsIgnoreMetadata(renderingEnvelope.getCoordinateReferenceSystem(), coverageCRS)) {
-                            renderingEnvelope = renderingEnvelope.transform(coverageCRS, true);
-                        }
-                        if(coverage.getEnvelope2D().intersects(renderingEnvelope)) {
-                            // the resulting coverage might be larger than the readGG envelope, shall we crop it?
-                            final ParameterValueGroup param = CROP.getParameters();
-                            param.parameter("Source").setValue(coverage);
-                            param.parameter("Envelope").setValue(renderingEnvelope);
-                            coverage = (GridCoverage2D) PROCESSOR.doOperation(param);
-                        } else {
-                            coverage = null;
-                        }
-                        
-                        if(coverage != null) {
-                            // we might also need to scale the coverage to the desired resolution
-                            MathTransform2D coverageTx = readGG.getGridToCRS2D();
-                            if(coverageTx instanceof AffineTransform) {
-                                AffineTransform coverageAt = (AffineTransform) coverageTx;
-                                AffineTransform renderingAt = (AffineTransform) gridGeometry.getGridToCRS2D();
-                                // we adjust the scale only if we have many more pixels than required (30% or more)
-                                final double ratioX = coverageAt.getScaleX() / renderingAt.getScaleX();
-                                final double ratioY = coverageAt.getScaleY() / renderingAt.getScaleY();
-                                if(ratioX < 0.7 && ratioY < 0.7) {
-                                    // resolution is too different
-                                    final ParameterValueGroup param = SCALE.getParameters();
-                                    param.parameter("Source").setValue(coverage);
-                                    param.parameter("xScale").setValue(ratioX);
-                                    param.parameter("yScale").setValue(ratioY);
-                                    final Interpolation interpolation = (Interpolation) java2dHints.get(JAI.KEY_INTERPOLATION);
-                                    if(interpolation != null) {
-                                        param.parameter("Interpolation").setValue(interpolation);
-                                    }
-    
-                                    coverage = (GridCoverage2D) PROCESSOR.doOperation(param);
-                                }
-                            }
-                        }
-                    }
-                    
-                    if(coverage != null) {
-                        // apply the transformation
-                        result = transformation.evaluate(coverage);
-                    } else {
-                        result = null;
-                    }
-                }
-            } 
-        }
-        
-        if(result == null && !isRasterData) {
-            // it's a transformation starting from vector data, let's see if we can optimize the query
-            FeatureCollection originalFeatures;
-            Query optimizedQuery = null;
-            if(transformation instanceof RenderingTransformation) {
-                RenderingTransformation tx = (RenderingTransformation) transformation;
-                optimizedQuery = tx.invertQuery(renderingQuery, gridGeometry);
-            }
-            // if we could not find an optimized query no other choice but to just limit
-            // ourselves to the bbox, we don't know if the transformation alters/adds attributes :-(
-            if(optimizedQuery == null) {
-                 Envelope bounds = (Envelope) renderingQuery.getFilter().accept(ExtractBoundsFilterVisitor.BOUNDS_VISITOR, null);
-                 Filter bbox = new FastBBOX(filterFactory.property(""), bounds, filterFactory);
-                 optimizedQuery = new Query(null, bbox);
-                 optimizedQuery.setHints(layerQuery.getHints());
-            }
-            
-            // grab the original features
-            Query mixedQuery = DataUtilities.mixQueries(layerQuery, optimizedQuery, null);
-            originalFeatures = featureSource.getFeatures(mixedQuery);
-            prepFeatureCollection(originalFeatures, sourceCrs);
-            
-            // transform them
-            result = transformation.evaluate(originalFeatures);
-        } 
-        
-        // null safety, a transformation might be free to return null
-        if(result == null) {
-            return null;
-        }
-        
-        // what did we get? raster or vector?
-        if(result instanceof FeatureCollection) {
-            return (FeatureCollection) result;
-        } else if(result instanceof GridCoverage2D) {
-            return FeatureUtilities.wrapGridCoverage((GridCoverage2D) result);
-        } else if(result instanceof GridCoverage2DReader) {
-            return FeatureUtilities.wrapGridCoverageReader((GridCoverage2DReader) result, null);
-        } else {
-            throw new IllegalArgumentException("Don't know how to handle the results of the transformation, " +
-                    "the supported result types are FeatureCollection, GridCoverage2D " +
-                    "and GridCoverage2DReader, but we got: " + result.getClass());
         }
     }
 
@@ -2484,6 +2392,7 @@ public class StreamingRenderer implements GTRenderer {
             try {
                 boolean clone = isCloningRequired(currLayer, fts_array);
                 RenderableFeature rf = new RenderableFeature(currLayer, clone);
+                rf.setScreenMap(liteFeatureTypeStyle.screenMap);
                 // loop exit condition tested inside try catch
                 // make sure we test hasNext() outside of the try/cath that follows, as that
                 // one is there to make sure a single feature error does not ruin the rendering
@@ -2499,6 +2408,15 @@ public class StreamingRenderer implements GTRenderer {
                 }
             } finally {
                 DataUtilities.close( iterator );
+            }
+
+            if (liteFeatureTypeStyle.composite != null) {
+                try {
+                    requests.put(new MergeLayersRequest(graphics,
+                            new LiteFeatureTypeStyle[] { liteFeatureTypeStyle }));
+                } catch (InterruptedException e) {
+                    fireErrorEvent(e);
+                }
             }
         }
     }
@@ -2660,6 +2578,11 @@ public class StreamingRenderer implements GTRenderer {
             if (filter == null || filter.evaluate(rf.content)) {
                 doElse = false;
                 processSymbolizers(graphics, rf, r.symbolizers(), scaleRange, at, destinationCrs, layerId);
+                
+                // bail out if we are in match first mode
+                if(fts.matchFirst) {
+                    break;
+                }
             }
         }
 
@@ -2701,7 +2624,7 @@ public class StreamingRenderer implements GTRenderer {
             NumberRange scaleRange, AffineTransform at,
             CoordinateReferenceSystem destinationCrs, String layerId)
             throws Exception {
-        
+        int paintCommands = 0;
         for (Symbolizer symbolizer : symbolizers) {
 
             // /////////////////////////////////////////////////////////////////
@@ -2721,24 +2644,23 @@ public class StreamingRenderer implements GTRenderer {
                     final Object grid = gridPropertyName.evaluate(drawMe.content);
                     if (grid instanceof GridCoverage2D) {
                         coverage = (GridCoverage2D) grid;
+                        if (coverage != null) {
+                            disposeCoverage = grid instanceof DisposableGridCoverage;
+                            requests.put(new RenderRasterRequest(graphics, coverage,
+                                    disposeCoverage, (RasterSymbolizer) symbolizer, destinationCrs,
+                                    at));
+                            paintCommands++;
+                        }
                     } else if (grid instanceof GridCoverage2DReader) {
-                        final Object params = paramsPropertyName.evaluate(drawMe.content);
-                        GridGeometry2D readGG = new GridGeometry2D(new GridEnvelope2D(screenSize), mapExtent);
+                        final GeneralParameterValue[] params = (GeneralParameterValue[]) paramsPropertyName
+                                .evaluate(drawMe.content);
                         GridCoverage2DReader reader = (GridCoverage2DReader) grid;
-                        coverage = readCoverage(reader, params, readGG);
-                        disposeCoverage = true;
+                        requests.put(new RenderCoverageReaderRequest(graphics, reader, params,
+                                (RasterSymbolizer) symbolizer, destinationCrs, at));
                     }
                 } catch (IllegalArgumentException e) {
                     LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
                     fireErrorEvent(e);
-                } catch (IOException e) {
-                    LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
-                    fireErrorEvent(e);
-                }
-                
-                if(coverage != null) {
-                    requests.put(new RenderRasterRequest(graphics, coverage, disposeCoverage,
-                            (RasterSymbolizer) symbolizer, destinationCrs, at));
                 }
             } else {
 
@@ -2755,20 +2677,24 @@ public class StreamingRenderer implements GTRenderer {
                 if (symbolizer instanceof TextSymbolizer && drawMe.content instanceof Feature) {
                     labelCache.put(layerId, (TextSymbolizer) symbolizer, (Feature) drawMe.content,
                             shape, scaleRange);
+                    paintCommands++;
                 } else {
                     Style2D style = styleFactory.createStyle(drawMe.content,
                             symbolizer, scaleRange);
                     
                     // clip to the visible area + the size of the symbolizer (with some extra 
                     // to make sure we get no artefacts from polygon new borders)
-                    double size = RendererUtilities.getStyle2DSize(style) + 10;
+                    double size = RendererUtilities.getStyle2DSize(style);
+                    // take into account the meta buffer to try and clip all geometries by the same
+                    // amount
+                    double clipBuffer = Math.max(size / 2, metaBuffer) + 10;
                     Envelope env = new Envelope(screenSize.getMinX(), screenSize.getMaxX(), screenSize.getMinY(), screenSize.getMaxY());
-                    env.expandBy(size);
+                    env.expandBy(clipBuffer);
                     final GeometryClipper clipper = new GeometryClipper(env);
                     Geometry g = clipper.clip(shape.getGeometry(), false);
-                    //System.out.println(g);
-                    if(g == null) 
+                    if(g == null) {
                         continue;
+                    }
                     if(g != shape.getGeometry()) {
                         shape = new LiteShape2(g, null, null, false);
                     }
@@ -2779,11 +2705,51 @@ public class StreamingRenderer implements GTRenderer {
                         paintShapeRequest.setLabelObstacle(true);
                     }
                     requests.put(paintShapeRequest);
+                    paintCommands++;
                 }
 
             }
         }
-        fireFeatureRenderedEvent(drawMe.content);
+        // only emit a feature drawn event if we actually painted something with it, 
+        // if it has been clipped out or eliminated by the screenmap we won't emit the event instead
+        if(paintCommands > 0) {
+            requests.put(new FeatureRenderedRequest(drawMe.content));
+        }
+    }
+
+    /**
+     * Builds a raster grid geometry that will be used for reading, taking into account
+     * the original map extent and target paint area, and expanding the target raster area
+     * by {@link #REPROJECTION_RASTER_GUTTER}
+     * @param destinationCrs
+     * @param sourceCRS
+     * @return
+     * @throws NoninvertibleTransformException
+     */
+    GridGeometry2D getRasterGridGeometry(CoordinateReferenceSystem destinationCrs,
+            CoordinateReferenceSystem sourceCRS) throws NoninvertibleTransformException {
+        GridGeometry2D readGG;
+        if (sourceCRS == null || destinationCrs == null ||
+                CRS.equalsIgnoreMetadata(destinationCrs, sourceCRS)) {
+            readGG = new GridGeometry2D(new GridEnvelope2D(screenSize),
+                    originalMapExtent);
+        } else {
+            // reprojection involved, read a bit more pixels to account for rotation
+            Rectangle bufferedTargetArea = (Rectangle) screenSize.clone();
+            bufferedTargetArea.add( // exand top/right
+                    screenSize.x + screenSize.width + REPROJECTION_RASTER_GUTTER, 
+                    screenSize.y + screenSize.height + REPROJECTION_RASTER_GUTTER);
+            bufferedTargetArea.add( // exand bottom/left
+                    screenSize.x - REPROJECTION_RASTER_GUTTER,
+                    screenSize.y - REPROJECTION_RASTER_GUTTER);
+
+            // now create the final envelope accordingly
+            readGG = new GridGeometry2D(new GridEnvelope2D(bufferedTargetArea),
+                    PixelInCell.CELL_CORNER, new AffineTransform2D(
+                            worldToScreenTransform.createInverse()),
+                    originalMapExtent.getCoordinateReferenceSystem(), null);
+        }
+        return readGG;
     }
 
 
@@ -2818,10 +2784,10 @@ public class StreamingRenderer implements GTRenderer {
             } else if (drawMe instanceof Feature) {
                 geom = (Geometry) ((Feature) drawMe).getDefaultGeometryProperty().getValue();
             } else {
-                geom = (Geometry) defaultGeometryPropertyName.evaluate(drawMe, Geometry.class);
+                geom = defaultGeometryPropertyName.evaluate(drawMe, Geometry.class);
             }
         } else {
-            geom = (Geometry) geomExpr.evaluate(drawMe, Geometry.class);
+            geom = geomExpr.evaluate(drawMe, Geometry.class);
         }
 
         return geom;    
@@ -2915,7 +2881,7 @@ public class StreamingRenderer implements GTRenderer {
     private int getRenderingBuffer() {
         if (rendererHints == null)
             return renderingBufferDEFAULT;
-        Number result = (Number) rendererHints.get("renderingBuffer");
+        Number result = (Number) rendererHints.get(RENDERING_BUFFER);
         if (result == null)
             return renderingBufferDEFAULT;
         return result.intValue();
@@ -3071,57 +3037,19 @@ public class StreamingRenderer implements GTRenderer {
         return null;
     }
     
-    GridCoverage2D readCoverage(final GridCoverage2DReader reader, final Object params, GridGeometry2D readGG) throws IOException {
-        GridCoverage2D coverage;
-        // read the coverage with the proper target geometry (will trigger cropping and resolution reduction)
-        final Parameter<GridGeometry2D> readGGParam = new Parameter<GridGeometry2D>(
-                AbstractGridFormat.READ_GRIDGEOMETRY2D);
-        readGGParam.setValue(readGG);
-        // then I try to get read parameters associated with this
-        // coverage if there are any.
-        if (params != null) {
-            // //
-            //
-            // Getting parameters to control how to read this coverage.
-            // Remember to check to actually have them before forwarding
-            // them to the reader.
-            //
-            // //
-            GeneralParameterValue[] readParams = (GeneralParameterValue[]) params;
-            final int length = readParams.length;
-            if (length > 0) {
-                // we have a valid number of parameters, let's check if
-                // also have a READ_GRIDGEOMETRY2D. In such case we just
-                // override it with the one we just build for this
-                // request.
-                final String name = AbstractGridFormat.READ_GRIDGEOMETRY2D.getName().toString();
-                int i = 0;
-                for (; i < length; i++)
-                    if (readParams[i].getDescriptor().getName().toString().equalsIgnoreCase(name))
-                        break;
-                // did we find anything?
-                if (i < length) {
-                    // we found another READ_GRIDGEOMETRY2D, let's override it.
-                    ((Parameter) readParams[i]).setValue(readGGParam);
-                    coverage = (GridCoverage2D) reader.read(readParams);
-                } else {
-                    // add the correct read geometry to the supplied
-                    // params since we did not find anything
-                    GeneralParameterValue[] readParams2 = new GeneralParameterValue[length + 1];
-                    System.arraycopy(readParams, 0, readParams2, 0, length);
-                    readParams2[length] = readGGParam;
-                    coverage = (GridCoverage2D) reader.read(readParams2);
-                }
-            } else
-                // we have no parameters hence we just use the read grid
-                // geometry to get a coverage
-                coverage = (GridCoverage2D) reader.read(new GeneralParameterValue[] { readGGParam });
-        } else if(readGG != null) {
-            coverage = (GridCoverage2D) reader.read(new GeneralParameterValue[] { readGGParam });
-        } else {
-            coverage = (GridCoverage2D) reader.read(null);
+    Interpolation getRenderingInterpolation() {
+        if(java2dHints == null) {
+            return Interpolation.getInstance(Interpolation.INTERP_NEAREST);
         }
-        return coverage;
+        Object interpolationHint = java2dHints.get(RenderingHints.KEY_INTERPOLATION);
+        if (interpolationHint == null
+                || interpolationHint == RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR) {
+            return Interpolation.getInstance(Interpolation.INTERP_NEAREST);
+        } else if (interpolationHint == RenderingHints.VALUE_INTERPOLATION_BILINEAR) {
+            return Interpolation.getInstance(Interpolation.INTERP_BILINEAR);
+        } else {
+            return Interpolation.getInstance(Interpolation.INTERP_BICUBIC);
+        }
     }
 
     /**
@@ -3193,7 +3121,7 @@ public class StreamingRenderer implements GTRenderer {
                     sa.crs = (findGeometryCS(layer, content, symbolizer));
                     try {
                         crsTransform = buildTransform(sa.crs, destinationCrs);
-                        atTransform = (MathTransform2D) ProjectiveTransform.create(worldToScreenTransform);
+                        atTransform = ProjectiveTransform.create(worldToScreenTransform);
                         fullTransform = buildFullTransform(sa.crs, destinationCrs, at);
                     } catch (Exception e) {
                         // fall through
@@ -3202,6 +3130,11 @@ public class StreamingRenderer implements GTRenderer {
                     sa.xform = fullTransform;
                     sa.crsxform = crsTransform;
                     sa.axform = atTransform;
+                    if(projectionHandler != null) {
+                        sa.rxform = projectionHandler.getRenderingTransform(sa.crsxform);
+                    } else {
+                        sa.rxform = sa.crsxform;
+                    }
     
                     symbolizerAssociationHT.put(symbolizer, sa);
                 }
@@ -3267,21 +3200,22 @@ public class StreamingRenderer implements GTRenderer {
 
             // we need to clone if the clone flag is high or if the coordinate sequence is not the one we asked for
             Geometry geom = originalGeom;
-            if(clone || !(geom.getFactory().getCoordinateSequenceFactory() instanceof LiteCoordinateSequenceFactory)) {
-                int dim = sa.crs != null ? sa.crs.getCoordinateSystem().getDimension() : 2; 
+            if (clone
+                    || !(geom.getFactory().getCoordinateSequenceFactory() instanceof LiteCoordinateSequenceFactory)) {
+                int dim = sa.crs != null ? sa.crs.getCoordinateSystem().getDimension() : 2;
                 geom = LiteCoordinateSequence.cloneGeometry(geom, dim);
             }
 
             LiteShape2 shape;
             if(projectionHandler != null && sa != null) {
                 // first generalize and transform the geometry into the rendering CRS
-                geom = projectionHandler.preProcess(sa.crs, geom);
+                geom = projectionHandler.preProcess(geom);
                 if(geom == null) {
                     shape = null;
                 } else {
                     // first generalize and transform the geometry into the rendering CRS
                     Decimator d = getDecimator(sa.xform);
-                    d.decimateTransformGeneralize(geom, sa.crsxform);
+                    geom = d.decimateTransformGeneralize(geom, sa.rxform);
                     geom.geometryChanged();
                     // then post process it (provide reverse transform if available)
                     MathTransform reverse = null;
@@ -3306,7 +3240,7 @@ public class StreamingRenderer implements GTRenderer {
                     } else {
                         // apply the affine transform turning the coordinates into pixels
                         d = new Decimator(-1, -1);
-                        d.decimateTransformGeneralize(geom, sa.axform);
+                        geom = d.decimateTransformGeneralize(geom, sa.axform);
     
                         // wrap into a lite shape
                         geom.geometryChanged();
@@ -3315,7 +3249,7 @@ public class StreamingRenderer implements GTRenderer {
                 } 
             } else {
                 MathTransform xform = null;
-                if(sa != null)
+                if (sa != null)
                     xform = sa.xform;
                 shape = new LiteShape2(geom, xform, getDecimator(xform), false, false);
             }
@@ -3405,6 +3339,24 @@ public class StreamingRenderer implements GTRenderer {
     }
     
     /**
+     * A request to paint a shape with a specific Style2D
+     * @author aaime
+     *
+     */
+    class FeatureRenderedRequest extends RenderingRequest {
+        Object content; 
+        
+        public FeatureRenderedRequest(Object content) {
+            this.content = content;
+        }
+
+        @Override
+        void execute() {
+            fireFeatureRenderedEvent(content);
+        }
+    }
+    
+    /**
      * A request to merge multiple back buffers to the main graphics
      * @author aaime
      *
@@ -3422,16 +3374,25 @@ public class StreamingRenderer implements GTRenderer {
 
         @Override
         void execute() {
-            graphics.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER));
+            if (graphics instanceof DelayedBackbufferGraphic) {
+                ((DelayedBackbufferGraphic) graphics).init();
+            }
+
             for (int t = 0; t < fts_array.length; t++) {
+                LiteFeatureTypeStyle currentLayer = fts_array[t];
                 // first fts won't have an image, it's using the user provided graphics
                 // straight, so we don't need to compose it back in.
-                final Graphics2D ftsGraphics = fts_array[t].graphics;
-                if (ftsGraphics instanceof DelayedBackbufferGraphic) {
+                final Graphics2D ftsGraphics = currentLayer.graphics;
+                if (ftsGraphics instanceof DelayedBackbufferGraphic && !(ftsGraphics == graphics)) {
                     final BufferedImage image = ((DelayedBackbufferGraphic) ftsGraphics).image;
                     // we may have not found anything to paint, in that case the delegate
                     // has not been initialized
                     if(image != null) {
+                        if (currentLayer.composite == null) {
+                            graphics.setComposite(AlphaComposite.SrcOver);
+                        } else {
+                            graphics.setComposite(currentLayer.composite);
+                        }
                         graphics.drawImage(image, 0, 0, null);
                         ftsGraphics.dispose();
                     }
@@ -3441,10 +3402,42 @@ public class StreamingRenderer implements GTRenderer {
         }
     }
     
+    class MargeCompositingGroupRequest extends RenderingRequest {
+        Graphics2D graphics;
+
+        CompositingGroup compositingGroup;
+
+        public MargeCompositingGroupRequest(Graphics2D graphics, CompositingGroup compositingGroup) {
+            this.graphics = graphics;
+            this.compositingGroup = compositingGroup;
+        }
+
+        @Override
+        void execute() {
+            if (graphics instanceof DelayedBackbufferGraphic) {
+                ((DelayedBackbufferGraphic) graphics).init();
+            }
+            final BufferedImage image = ((DelayedBackbufferGraphic) compositingGroup.graphics).image;
+            // we may have not found anything to paint, in that case the delegate
+            // has not been initialized
+            if (image != null) {
+                compositingGroup.graphics.dispose();
+                Composite composite = compositingGroup.composite;
+                if (composite == null) {
+                    graphics.setComposite(AlphaComposite.SrcOver);
+                } else {
+                    graphics.setComposite(composite);
+                }
+                graphics.drawImage(image, 0, 0, null);
+            }
+
+        }
+
+    }
+
     /**
      * A request to render a raster
      * @author aaime
-     *
      */
     public class RenderRasterRequest extends RenderingRequest {
 
@@ -3470,6 +3463,10 @@ public class StreamingRenderer implements GTRenderer {
         void execute() {
             if (LOGGER.isLoggable(Level.FINE)) {
                 LOGGER.fine("Rendering Raster " + coverage);
+            }
+
+            if (graphics instanceof DelayedBackbufferGraphic) {
+                ((DelayedBackbufferGraphic) graphics).init();
             }
 
             try {
@@ -3501,22 +3498,84 @@ public class StreamingRenderer implements GTRenderer {
                     LOGGER.fine("Raster rendered");
                 }
 
-            } catch (FactoryException e) {
+            } catch (Exception e) {
                 LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
                 fireErrorEvent(e);
-            } catch (TransformException e) {
-                LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
-                fireErrorEvent(e);
-            } catch (NoninvertibleTransformException e) {
-                LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
-                fireErrorEvent(e);
-            } catch (IllegalArgumentException e) {
+            } 
+        }
+    }
+    
+    /**
+     * A request to render a raster
+     * 
+     * @author aaime
+     */
+    public class RenderCoverageReaderRequest extends RenderingRequest {
+
+        private Graphics2D graphics;
+
+        private GridCoverage2DReader reader;
+
+        private RasterSymbolizer symbolizer;
+
+        private CoordinateReferenceSystem destinationCRS;
+
+        private AffineTransform worldToScreen;
+
+        private GeneralParameterValue[] readParams;
+
+        public RenderCoverageReaderRequest(Graphics2D graphics, GridCoverage2DReader reader,
+                GeneralParameterValue[] readParams,
+                RasterSymbolizer symbolizer, CoordinateReferenceSystem destinationCRS,
+                AffineTransform worldToScreen) {
+            this.graphics = graphics;
+            this.reader = reader;
+            this.readParams = readParams;
+            this.symbolizer = symbolizer;
+            this.destinationCRS = destinationCRS;
+            this.worldToScreen = worldToScreen;
+        }
+
+        @Override
+        void execute() {
+            if (LOGGER.isLoggable(Level.FINE)) {
+                LOGGER.fine("Rendering reader " + reader);
+            }
+
+            if (graphics instanceof DelayedBackbufferGraphic) {
+                ((DelayedBackbufferGraphic) graphics).init();
+            }
+
+            try {
+                // /////////////////////////////////////////////////////////////////
+                //
+                // If the grid object is a reader we ask him to do its best for the
+                // requested resolution, if it is a gridcoverage instead we have to
+                // rely on the gridocerage renderer itself.
+                //
+                // /////////////////////////////////////////////////////////////////
+                final GridCoverageRenderer gcr = new GridCoverageRenderer(destinationCRS,
+                        originalMapExtent, screenSize, worldToScreen, java2dHints);
+
+                Interpolation interpolation = getRenderingInterpolation();
+
+                // Checks on the Reprojection parameters
+                gcr.setAdvancedProjectionHandlingEnabled(isAdvancedProjectionHandlingEnabled());
+                gcr.setWrapEnabled(isMapWrappingEnabled());
+                gcr.paint(graphics, reader, readParams, symbolizer, interpolation, null);
+
+                if (LOGGER.isLoggable(Level.FINE)) {
+                    LOGGER.fine("Raster rendered");
+                }
+
+            } catch (Exception e) {
                 LOGGER.log(Level.WARNING, e.getLocalizedMessage(), e);
                 fireErrorEvent(e);
             }
         }
+
     }
-    
+
     class RenderDirectLayerRequest extends RenderingRequest {
         private final Graphics2D graphics;
         private final DirectLayer layer;
@@ -3530,6 +3589,10 @@ public class StreamingRenderer implements GTRenderer {
         void execute() {
             if (LOGGER.isLoggable(Level.FINE)) {
                 LOGGER.fine("Rendering DirectLayer: " + layer);
+            }
+
+            if (graphics instanceof DelayedBackbufferGraphic) {
+                ((DelayedBackbufferGraphic) graphics).init();
             }
 
             try {

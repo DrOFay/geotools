@@ -24,6 +24,7 @@ import java.io.OutputStream;
 import java.net.URI;
 
 import junit.framework.TestCase;
+import org.geotools.data.DataUtilities;
 
 /**
  * @author "Mauro Bartolomeoli - mauro.bartolomeoli@geo-solutions.it"
@@ -65,9 +66,9 @@ public class SchemaFactoryResolveTest extends TestCase {
     }
     
     public void testCachedPathResolve() throws Exception {
-        File folder = new File(tempFolder.getAbsolutePath() + File.separator
+        File folder = new File(tempFolder + File.separator
                 + "org" + File.separator + "geotools" + File.separator + "xml");
-        folder.mkdirs();
+        assertTrue(folder.mkdirs());
         
         copy("/org/geotools/xml/test.xsd", "cached.xsd", folder);
         copy("/org/geotools/xml/XMLSchema.dtd", "XMLSchema.dtd", folder);
@@ -76,7 +77,8 @@ public class SchemaFactoryResolveTest extends TestCase {
         
         assertNotNull(SchemaFactory.getInstance(
                 URI.create("http://www.w3.org/XML/1998/namespace/cached"),
-                URI.create("http://geotools.org/xml/cached.xsd")));
+                //URI.create("http://geotools.org/xml/cached.xsd")));
+                new File(folder,"cached.xsd").toURI()));
     }
     
     public void testRemotePathResolve() throws Exception {

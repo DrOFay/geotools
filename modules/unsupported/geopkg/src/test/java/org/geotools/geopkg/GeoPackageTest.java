@@ -1,3 +1,19 @@
+/*
+ *    GeoTools - The Open Source Java GIS Toolkit
+ *    http://geotools.org
+ *
+ *    (C) 2002-2010, Open Source Geospatial Foundation (OSGeo)
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License as published by the Free Software Foundation;
+ *    version 2.1 of the License.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ */
 package org.geotools.geopkg;
 
 import static org.junit.Assert.assertEquals;
@@ -15,14 +31,25 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.logging.Level;
 
 import org.apache.commons.io.FileUtils;
 import org.geotools.TestData;
 import org.geotools.coverage.grid.GridCoverage2D;
 import org.geotools.data.DataUtilities;
+import org.geotools.data.DefaultTransaction;
+import org.geotools.data.Transaction;
+import org.geotools.data.memory.MemoryFeatureCollection;
 import org.geotools.data.shapefile.ShapefileDataStore;
+import org.geotools.data.simple.SimpleFeatureCollection;
+import org.geotools.data.simple.SimpleFeatureIterator;
 import org.geotools.data.simple.SimpleFeatureReader;
+import org.geotools.data.simple.SimpleFeatureWriter;
+import org.geotools.factory.CommonFactoryFinder;
 import org.geotools.factory.Hints;
+import org.geotools.feature.simple.SimpleFeatureBuilder;
+import org.geotools.feature.simple.SimpleFeatureTypeBuilder;
 import org.geotools.gce.geotiff.GeoTiffFormat;
 import org.geotools.gce.geotiff.GeoTiffReader;
 import org.geotools.gce.image.WorldImageFormat;
@@ -38,7 +65,9 @@ import org.geotools.geopkg.Tile;
 import org.geotools.geopkg.TileEntry;
 import org.geotools.geopkg.TileMatrix;
 import org.geotools.geopkg.TileReader;
+import org.geotools.referencing.CRS;
 import org.geotools.referencing.crs.DefaultGeographicCRS;
+import org.geotools.sql.SqlUtil;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -46,9 +75,16 @@ import org.junit.Ignore;
 import org.junit.Test;
 import org.opengis.coverage.grid.GridCoverageReader;
 import org.opengis.feature.simple.SimpleFeature;
+import org.opengis.feature.simple.SimpleFeatureType;
 import org.opengis.feature.type.AttributeDescriptor;
+import org.opengis.feature.type.PropertyDescriptor;
+import org.opengis.filter.FilterFactory;
 
+import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Geometry;
+import com.vividsolutions.jts.geom.GeometryFactory;
+import com.vividsolutions.jts.geom.Point;
+import com.vividsolutions.jts.geom.PrecisionModel;
 
 public class GeoPackageTest {
 
@@ -80,9 +116,26 @@ public class GeoPackageTest {
 
     @Test
     public void testInit() throws Exception {
-        assertTableExists("geopackage_contents");
-        assertTableExists("geometry_columns");
-        assertTableExists("spatial_ref_sys");
+        assertTableExists("gpkg_contents");
+        assertTableExists("gpkg_geometry_columns");
+        assertTableExists("gpkg_spatial_ref_sys");
+        assertApplicationId();
+    }
+    
+    void assertApplicationId() throws Exception {
+        Connection cx = geopkg.getDataSource().getConnection();
+        Statement st = cx.createStatement();
+        try {
+            ResultSet rs = st.executeQuery("PRAGMA application_id;");
+            assertEquals(rs.getInt(1), 0x47503130);
+        }
+        catch(Exception e) {
+            fail(e.getMessage());
+        }
+        finally {
+            st.close();
+            cx.close();
+        }
     }
 
     void assertTableExists(String table) throws Exception {
@@ -98,6 +151,68 @@ public class GeoPackageTest {
             st.close();
             cx.close();
         }
+    }
+
+    boolean doesEntryExists(String table, Entry entry) throws Exception {
+        boolean exists = false;
+        Connection cx = geopkg.getDataSource().getConnection();
+        try {
+            String sql =  String.format("SELECT * FROM %s WHERE table_name = ?", table);
+            SqlUtil.PreparedStatementBuilder psb = SqlUtil.prepare(cx, sql).set(entry.getTableName());
+            PreparedStatement ps = psb.log(Level.FINE).statement();
+            try {
+                ResultSet rs = ps.executeQuery();
+                try {
+                    while(rs.next()) {
+                        exists = true;
+                    }
+                } finally {
+                    rs.close();
+                }
+            }
+            finally {
+                ps.close();
+            }
+        }
+        catch(Exception e) {
+            fail(e.getMessage());
+        }
+        finally {
+            cx.close();
+        }
+        return exists;
+    }
+
+    @Test
+    public void testDeleteGeoPackageContentsEntry() throws Exception {
+        Entry entry = new Entry();
+        entry.setTableName("points");
+        entry.setDataType(Entry.DataType.Feature);
+        entry.setIdentifier("points");
+        entry.setBounds(new ReferencedEnvelope(-180,180,-90,90, CRS.decode("EPSG:4326")));
+        entry.setSrid(4326);
+
+        geopkg.addGeoPackageContentsEntry(entry);
+        assertTrue(doesEntryExists(GeoPackage.GEOPACKAGE_CONTENTS, entry));
+        geopkg.deleteGeoPackageContentsEntry(entry);
+        assertFalse(doesEntryExists(GeoPackage.GEOPACKAGE_CONTENTS, entry));
+    }
+
+    @Test
+    public void testDeleteGeometryColumnsEntry() throws Exception {
+        FeatureEntry entry = new FeatureEntry();
+        entry.setTableName("points");
+        entry.setDataType(Entry.DataType.Feature);
+        entry.setIdentifier("points");
+        entry.setBounds(new ReferencedEnvelope(-180,180,-90,90, CRS.decode("EPSG:4326")));
+        entry.setSrid(4326);
+        entry.setGeometryColumn("geom");
+        entry.setGeometryType(Geometries.POINT);
+
+        geopkg.addGeometryColumnsEntry(entry);
+        assertTrue(doesEntryExists(GeoPackage.GEOMETRY_COLUMNS, entry));
+        geopkg.deleteGeometryColumnsEntry(entry);
+        assertFalse(doesEntryExists(GeoPackage.GEOMETRY_COLUMNS, entry));
     }
 
     @Test
@@ -122,6 +237,206 @@ public class GeoPackageTest {
 
         re.close();
         ra.close();
+    }
+    
+    @Test
+    public void test3DGeometry() throws Exception {
+        //create feature with 3d geometry
+        Point geom = new GeometryFactory(new PrecisionModel(), 4326).createPoint(new Coordinate(5,3,8));
+        SimpleFeatureTypeBuilder tBuilder = new SimpleFeatureTypeBuilder();
+        tBuilder.setName( "mytype" );
+        tBuilder.add( "name", String.class);
+        tBuilder.add( "geom", Geometry.class, 4326);
+        SimpleFeatureType type = tBuilder.buildFeatureType();
+        SimpleFeatureBuilder fBuilder = new SimpleFeatureBuilder(type);        
+        MemoryFeatureCollection featCollection = new MemoryFeatureCollection(type);
+        fBuilder.add("testfeature");
+        fBuilder.add(geom);
+        featCollection.add(fBuilder.buildFeature("fid-0001"));
+        
+        FeatureEntry entry = new FeatureEntry();
+        //important, store in database that there is a z
+        entry.setZ(true);
+        geopkg.add(entry, featCollection);
+
+        assertTableExists("mytype");
+
+        //check metadata contents
+        assertFeatureEntry(entry);
+        
+        //read feature and verify dimension
+        SimpleFeatureReader ra = geopkg.reader(entry, null, null);
+        assertTrue(ra.hasNext());
+        
+        SimpleFeature f = ra.next();
+        Point readGeom = (Point) f.getAttribute("geom");
+        
+        assertEquals(3, readGeom.getCoordinateSequence().getDimension());
+        assertEquals(geom.getCoordinate().z, readGeom.getCoordinate().z, 0.0001);
+        
+        ra.close();
+    }
+    
+    @Test 
+    public void testFunctions() throws Exception {
+        ShapefileDataStore shp = new ShapefileDataStore(setUpShapefile());
+        SimpleFeatureReader re = Features.simple(shp.getFeatureReader());
+
+        FeatureEntry entry = new FeatureEntry();
+        geopkg.add(entry, shp.getFeatureSource(), null);
+              
+        Connection cx = geopkg.getDataSource().getConnection();
+        Statement st = cx.createStatement();
+        try {            
+            while(re.hasNext()) {
+                SimpleFeature f = re.next();
+                ResultSet rs = st.executeQuery((String.format(
+                        "SELECT ST_MinX(the_geom), ST_MinY(the_geom), ST_MaxX(the_geom), ST_MaxY(the_geom), ST_IsEmpty(the_geom) FROM bugsites WHERE ID=" + f.getProperty("ID").getValue())));
+                assertEquals(rs.getDouble(1), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMinX(), 0.0001 );
+                assertEquals(rs.getDouble(2), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMinY(), 0.0001 );
+                assertEquals(rs.getDouble(3), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMaxX(), 0.0001 );
+                assertEquals(rs.getDouble(4), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMaxY(), 0.0001 );
+                assertEquals(rs.getDouble(5)==1, ((Geometry) f.getDefaultGeometry()).isEmpty() );
+                rs.close();
+            }
+        }
+        catch(Exception e) {
+            fail(e.getMessage());
+        }
+        finally {
+            st.close();
+            cx.close();
+            re.close();
+        }
+    }
+    
+    @Test 
+    public void testFunctionsNoEnvelope() throws Exception {
+        ShapefileDataStore shp = new ShapefileDataStore(setUpShapefile());
+        SimpleFeatureReader re = Features.simple(shp.getFeatureReader());
+
+        FeatureEntry entry = new FeatureEntry();
+
+        geopkg.getWriterConfiguration().setWriteEnvelope(false);
+        geopkg.add(entry, shp.getFeatureSource(), null);
+              
+        Connection cx = geopkg.getDataSource().getConnection();
+        Statement st = cx.createStatement();
+        try {            
+            while(re.hasNext()) {
+                SimpleFeature f = re.next();
+                ResultSet rs = st.executeQuery((String.format(
+                        "SELECT ST_MinX(the_geom), ST_MinY(the_geom), ST_MaxX(the_geom), ST_MaxY(the_geom), ST_IsEmpty(the_geom) FROM bugsites WHERE ID=" + f.getProperty("ID").getValue())));
+                assertEquals(rs.getDouble(1), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMinX(), 0.0001 );
+                assertEquals(rs.getDouble(2), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMinY(), 0.0001 );
+                assertEquals(rs.getDouble(3), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMaxX(), 0.0001 );
+                assertEquals(rs.getDouble(4), ((Geometry) f.getDefaultGeometry()).getEnvelopeInternal().getMaxY(), 0.0001 );
+                assertEquals(rs.getDouble(5)==1, ((Geometry) f.getDefaultGeometry()).isEmpty() );
+                rs.close();
+            }
+        }
+        catch(Exception e) {
+            fail(e.getMessage());
+        }
+        finally {
+            st.close();
+            cx.close();
+            re.close();
+        }
+    }
+    
+    @Test 
+    public void testSpatialIndexWriting() throws Exception {
+        ShapefileDataStore shp = new ShapefileDataStore(setUpShapefile());
+        SimpleFeatureCollection coll = shp.getFeatureSource().getFeatures();
+
+        FeatureEntry entry = new FeatureEntry();
+        entry.setBounds(coll.getBounds());
+        geopkg.create(entry, shp.getSchema());
+        
+        //write some features before and some after
+        SimpleFeatureIterator it = coll.features();
+        
+        //some features
+        Transaction tx = new DefaultTransaction();
+        SimpleFeatureWriter w = geopkg.writer(entry, true, null, tx);
+        for (int i=0; i<3; i++) {
+            SimpleFeature f = it.next(); 
+            SimpleFeature g = w.next();
+            for (PropertyDescriptor pd : coll.getSchema().getDescriptors()) {
+                String name = pd.getName().getLocalPart();
+                g.setAttribute(name, f.getAttribute(name));
+            }
+                                         
+            w.write();
+        }
+        tx.commit();
+        tx.close();
+        w.close();
+        
+        //create spatial index
+        geopkg.createSpatialIndex(entry);
+                
+
+        //the rest of features
+        tx = new DefaultTransaction();
+        w = geopkg.writer(entry, true, null, tx);        
+        while(it.hasNext()) {
+            SimpleFeature f = it.next(); 
+            SimpleFeature g = w.next();
+            for (PropertyDescriptor pd : coll.getSchema().getDescriptors()) {
+                String name = pd.getName().getLocalPart();
+                g.setAttribute(name, f.getAttribute(name));
+            }
+                                         
+            w.write();
+        }
+        tx.commit();
+        tx.close();
+        w.close();
+        
+        it.close();
+        
+        //test if the index was properly created
+              
+        Connection cx = geopkg.getDataSource().getConnection();
+        Statement st = cx.createStatement();
+        try {            
+            ResultSet rs = st.executeQuery("SELECT COUNT(*) FROM rtree_bugsites_the_geom");
+            rs.next();
+            
+            assertEquals(rs.getInt(1), coll.size());
+        }
+        catch(Exception e) {
+            fail(e.getMessage());
+        }
+        finally {
+            st.close();
+            cx.close();
+        }
+    }
+    
+    @Test 
+    public void testSpatialIndexReading() throws Exception {
+        FilterFactory ff = CommonFactoryFinder.getFilterFactory();
+        
+        ShapefileDataStore shp = new ShapefileDataStore(setUpShapefile());
+
+        FeatureEntry entry = new FeatureEntry();
+        geopkg.add(entry, shp.getFeatureSource(), null);
+        
+        assertFalse(geopkg.hasSpatialIndex(entry));
+        
+        geopkg.createSpatialIndex(entry);
+        
+        assertTrue(geopkg.hasSpatialIndex(entry));
+        
+        Set ids = geopkg.searchSpatialIndex(entry, 590230.0, 4915038.0, 590234.0, 4915040.0);
+        SimpleFeatureReader sfr = geopkg.reader(entry, ff.id(ids), null);
+        
+        assertTrue(sfr.hasNext());
+        assertEquals("bugsites.1", sfr.next().getID().toString());
+        assertFalse(sfr.hasNext());       
     }
 
     @Test
@@ -225,7 +540,7 @@ public class GeoPackageTest {
         Connection cx = geopkg.getDataSource().getConnection();
         try {
             PreparedStatement ps = 
-                cx.prepareStatement("SELECT * FROM geopackage_contents WHERE table_name = ?");
+                cx.prepareStatement("SELECT * FROM gpkg_contents WHERE table_name = ?");
             ps.setString(1, entry.getTableName());
 
             ResultSet rs = ps.executeQuery();
@@ -233,7 +548,7 @@ public class GeoPackageTest {
 
             assertEquals(entry.getIdentifier(), rs.getString("identifier"));
             assertEquals(entry.getDescription(), rs.getString("description"));
-            assertEquals(entry.getSrid().intValue(), rs.getInt("srid"));
+            assertEquals(entry.getSrid().intValue(), rs.getInt("srs_id"));
 
             assertEquals(entry.getBounds().getMinX(), rs.getDouble("min_x"), 0.1);
             assertEquals(entry.getBounds().getMinY(), rs.getDouble("min_y"), 0.1);
@@ -254,16 +569,17 @@ public class GeoPackageTest {
         Connection cx = geopkg.getDataSource().getConnection();
         try {
             PreparedStatement ps = 
-                cx.prepareStatement("SELECT * FROM geometry_columns WHERE f_table_name = ?");
+                cx.prepareStatement("SELECT * FROM gpkg_geometry_columns WHERE table_name = ?");
             ps.setString(1, entry.getTableName());
 
             ResultSet rs = ps.executeQuery();
             assertTrue(rs.next());
 
-            assertEquals(entry.getGeometryColumn(), rs.getString("f_geometry_column"));
-            assertEquals(entry.getGeometryType(), Geometries.getForName(rs.getString("geometry_type")));
-            assertEquals(entry.getSrid().intValue(), rs.getInt("srid"));
-            assertEquals(entry.getCoordDimension().intValue(), rs.getInt("coord_dimension"));
+            assertEquals(entry.getGeometryColumn(), rs.getString("column_name"));
+            assertEquals(entry.getGeometryType(), Geometries.getForName(rs.getString("geometry_type_name")));
+            assertEquals(entry.getSrid().intValue(), rs.getInt("srs_id"));
+            assertEquals(entry.isZ(), rs.getBoolean("z"));
+            assertEquals(entry.isM(), rs.getBoolean("m"));
 
             rs.close();
             ps.close();
@@ -279,16 +595,16 @@ public class GeoPackageTest {
         Connection cx = geopkg.getDataSource().getConnection();
         try {
             PreparedStatement ps = 
-                cx.prepareStatement("SELECT * FROM raster_columns WHERE r_table_name = ?");
+                cx.prepareStatement("SELECT * FROM gpkg_data_columns WHERE table_name = ?");
             ps.setString(1, entry.getTableName());
 
             ResultSet rs = ps.executeQuery();
             assertTrue(rs.next());
 
-            assertEquals(entry.getRasterColumn(), rs.getString("r_raster_column"));
-            assertEquals(entry.getSrid().intValue(), rs.getInt("srid"));
-            assertEquals(entry.getGeoRectification().value(), rs.getInt("georectification"));
-            assertEquals(entry.getCompressionQualityFactor(), rs.getDouble("compr_qual_factor"), 0.1);
+            assertEquals(entry.getRasterColumn(), rs.getString("column_name"));
+            assertEquals(entry.getTableName(), rs.getString("table_name"));
+            assertEquals(entry.getName(), rs.getString("name"));
+            assertEquals(entry.getTitle(), rs.getString("title"));
 
             rs.close();
             ps.close();
@@ -303,25 +619,39 @@ public class GeoPackageTest {
         
         Connection cx = geopkg.getDataSource().getConnection();
         try {
-            PreparedStatement ps = 
-                cx.prepareStatement("SELECT * FROM tile_table_metadata WHERE t_table_name = ?");
+            PreparedStatement ps = cx.prepareStatement(
+                "SELECT count(*) from gpkg_tile_matrix WHERE table_name = ?");
             ps.setString(1, entry.getTableName());
-
             ResultSet rs = ps.executeQuery();
-            assertTrue(rs.next());
 
-            assertEquals(entry.isTimesTwoZoom(), rs.getBoolean("is_times_two_zoom"));
-
+            rs.next();
+            assertEquals(rs.getInt(1), entry.getTileMatricies().size());
+            
             rs.close();
             ps.close();
-
+            
             ps = cx.prepareStatement(
-                "SELECT count(*) from tile_matrix_metadata WHERE t_table_name = ?");
+                    "SELECT * from gpkg_tile_matrix_set WHERE table_name = ?");
             ps.setString(1, entry.getTableName());
             rs = ps.executeQuery();
 
             rs.next();
-            assertEquals(rs.getInt(1), entry.getTileMatricies().size());
+            assertEquals(rs.getInt(2), entry.getSrid().intValue());
+            assertEquals(rs.getDouble(3), entry.getBounds().getMinX(), 0.01);
+            assertEquals(rs.getDouble(4), entry.getBounds().getMinY(), 0.01);
+            assertEquals(rs.getDouble(5), entry.getBounds().getMaxX(), 0.01);
+            assertEquals(rs.getDouble(6), entry.getBounds().getMaxY(), 0.01);
+            
+            assertFalse(rs.next());
+
+            rs.close();
+            ps.close();
+            
+            //index
+            ps = cx.prepareStatement(
+                    "SELECT * from sqlite_master WHERE type='index' and name = ?");
+            ps.setString(1, entry.getTableName() + "_zyx_idx");
+            rs = ps.executeQuery();
 
             rs.close();
             ps.close();

@@ -63,8 +63,11 @@ class MergeSortDumper {
             if (sb != SortBy.NATURAL_ORDER && sb != SortBy.REVERSE_ORDER) {
                 AttributeDescriptor ad = schema.getDescriptor(sb.getPropertyName()
                         .getPropertyName());
+                if (ad == null) {
+                    return false;
+                }
                 Class<?> binding = ad.getType().getBinding();
-                if (ad == null || !Comparable.class.isAssignableFrom(binding) 
+                if (!Comparable.class.isAssignableFrom(binding) 
                         || Geometry.class.isAssignableFrom(binding)) {
                     return false;
                 }
@@ -76,19 +79,36 @@ class MergeSortDumper {
 
     static SimpleFeatureReader getDelegateReader(SimpleFeatureReader reader, Query query)
             throws IOException {
-        Hints hints = query.getHints();
+        int maxFeatures = getMaxFeatures(query);
+
+        return getDelegateReader(reader, query.getSortBy(), maxFeatures);
+    }
+
+    /**
+     * Gets the max amount amount of features to keep in memory from the query and system hints
+     * 
+     * @param query
+     * @return
+     */
+    static int getMaxFeatures(Query query) {
+        Hints hints = null;
+        if (query != null) {
+            hints = query.getHints();
+        }
         int maxFeatures = 1000;
         if (hints != null && hints.get(Hints.MAX_MEMORY_SORT) != null) {
             maxFeatures = (Integer) hints.get(Hints.MAX_MEMORY_SORT);
         } else if (Hints.getSystemDefault(Hints.MAX_MEMORY_SORT) != null) {
             maxFeatures = (Integer) Hints.getSystemDefault(Hints.MAX_MEMORY_SORT);
         }
-
-        return getDelegateReader(reader, query.getSortBy(), maxFeatures);
+        return maxFeatures;
     }
 
     static SimpleFeatureReader getDelegateReader(SimpleFeatureReader reader, SortBy[] sortBy,
             int maxFeatures) throws IOException {
+        if (maxFeatures < 0) {
+            maxFeatures = getMaxFeatures(Query.ALL);
+        }
         Comparator<SimpleFeature> comparator = getComparator(sortBy);
 
         // easy case, no sorting needed

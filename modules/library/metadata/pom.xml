@@ -16,7 +16,7 @@
   <parent>
     <groupId>org.geotools</groupId>
     <artifactId>library</artifactId>
-    <version>11-SNAPSHOT</version>
+    <version>13-SNAPSHOT</version>
   </parent>
 
 
@@ -110,6 +110,11 @@
       in distribution, unless the user really want to use Apache commons logging
       (in which case he should put this dependency explicitly on the classpath).
     -->
+    <dependency>
+      <groupId>javax.media</groupId>
+      <artifactId>jai_core</artifactId>
+      <!-- The version number is specified in the parent POM. -->
+    </dependency>
     <dependency>
       <groupId>commons-logging</groupId>
       <artifactId>commons-logging</artifactId>

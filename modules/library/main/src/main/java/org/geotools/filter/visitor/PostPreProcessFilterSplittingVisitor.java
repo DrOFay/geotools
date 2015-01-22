@@ -801,10 +801,7 @@ public class PostPreProcessFilterSplittingVisitor implements FilterVisitor, Expr
 	    }
         
 	    public Object visit(Literal expression, Object notUsed) {
-	        if (expression.getValue() == null) {
-	        	postStack.push(expression);
-	        }
-	        preStack.push(expression);
+            preStack.push(expression);
             return null;
 	    }
         
@@ -864,10 +861,6 @@ public class PostPreProcessFilterSplittingVisitor implements FilterVisitor, Expr
 	        preStack.push(expression);
 	    }
 	
-	    /**
-	     * 
-	     * @see org.geotools.filter.FilterVisitor#visit(org.geotools.filter.FunctionExpression)
-	     */
 	    public Object visit(Function expression, Object notUsed) {
 	        if (!fcs.supports(expression.getClass()) ) {
 	        	postStack.push(expression);
@@ -876,7 +869,7 @@ public class PostPreProcessFilterSplittingVisitor implements FilterVisitor, Expr
 	
 	        if (expression.getName() == null) {
 	        	postStack.push(expression);
-	            return null;
+	        	return null;
 	        }
 
 	        int i = postStack.size();

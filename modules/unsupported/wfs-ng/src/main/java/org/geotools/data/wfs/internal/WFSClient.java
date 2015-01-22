@@ -1,3 +1,19 @@
+/*
+ *    GeoTools - The Open Source Java GIS Toolkit
+ *    http://geotools.org
+ *
+ *    (C) 2008-2014, Open Source Geospatial Foundation (OSGeo)
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License as published by the Free Software Foundation;
+ *    version 2.1 of the License.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ */
 package org.geotools.data.wfs.internal;
 
 import static org.geotools.data.wfs.internal.Loggers.requestDebug;
@@ -16,11 +32,12 @@ import org.geotools.data.ows.HTTPClient;
 import org.geotools.data.ows.Request;
 import org.geotools.data.ows.Response;
 import org.geotools.data.ows.Specification;
-import org.geotools.data.wfs.impl.WFSServiceInfo;
+import org.geotools.data.wfs.WFSServiceInfo;
 import org.geotools.data.wfs.internal.GetFeatureRequest.ResultType;
 import org.geotools.data.wfs.internal.v1_x.CubeWerxStrategy;
 import org.geotools.data.wfs.internal.v1_x.GeoServerPre200Strategy;
 import org.geotools.data.wfs.internal.v1_x.IonicStrategy;
+import org.geotools.data.wfs.internal.v1_x.MapServerWFSStrategy;
 import org.geotools.data.wfs.internal.v1_x.StrictWFS_1_x_Strategy;
 import org.geotools.data.wfs.internal.v2_0.StrictWFS_2_0_Strategy;
 import org.geotools.geometry.jts.ReferencedEnvelope;
@@ -38,7 +55,7 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
 
     private static final Logger LOGGER = Logging.getLogger(WFSClient.class);
 
-    private final WFSConfig config;
+    protected final WFSConfig config;
 
     public WFSClient(URL capabilitiesURL, HTTPClient httpClient, WFSConfig config)
             throws IOException, ServiceException {
@@ -116,6 +133,8 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
         if (!"auto".equals(override)) {
             if (override.equalsIgnoreCase("geoserver")) {
                 strategy = new GeoServerPre200Strategy();
+            } else if (override.equalsIgnoreCase("mapserver")) {
+                strategy = new MapServerWFSStrategy(capabilitiesDoc);
             } else if (override.equalsIgnoreCase("cubewerx")) {
                 strategy = new CubeWerxStrategy();
             } else if (override.equalsIgnoreCase("ionic")) {
@@ -154,7 +173,7 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
                     LOGGER.warning("Found a Ionic server but the version may not match the strategy "
                             + "we have (v.4). Ionic namespace url: " + ionicNs);
                     strategy = new IonicStrategy();
-                }
+                } 
             }
         }
 
@@ -171,10 +190,12 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
              * feel free to apply the patch if its a blocker for you, but don't close this issue. Just add a reminder that the heuristic for geoserver
              * needs to be improved?
              */
-            if (!uri.startsWith("file:") && uri.contains("geoserver")) {
+            if (!uri.startsWith("file:") && uri.contains("geoserver") && !Versions.v2_0_0.equals(capsVersion)) {
                 strategy = new GeoServerPre200Strategy();
             } else if (uri.contains("/ArcGIS/services/")) {
                 strategy = new StrictWFS_1_x_Strategy(); // new ArcGISServerStrategy();
+            } else if (uri.contains("mapserver") || uri.contains("map=")) {
+                strategy = new MapServerWFSStrategy(capabilitiesDoc);
             }
         }
 
@@ -191,6 +212,9 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
             }
         }
         LOGGER.info("Using WFS Strategy: " + strategy.getClass().getName());
+        
+        strategy.setConfig(config);
+        
         return strategy;
     }
 
@@ -217,6 +241,11 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
 
     public boolean canSort() {
         return true;
+    }
+    
+    public boolean supportsStoredQueries() {
+        return getStrategy().supportsOperation(WFSOperationType.LIST_STORED_QUERIES, HttpMethod.POST) ||
+            getStrategy().supportsOperation(WFSOperationType.LIST_STORED_QUERIES, HttpMethod.GET);
     }
 
     public ReferencedEnvelope getBounds(QName typeName, CoordinateReferenceSystem targetCrs) {
@@ -268,6 +297,16 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
         return (GetCapabilitiesResponse) internalIssueRequest(request);
     }
 
+    public ListStoredQueriesResponse issueRequest(ListStoredQueriesRequest request)
+        throws IOException {
+        return (ListStoredQueriesResponse) internalIssueRequest(request);
+    }
+    
+    public DescribeStoredQueriesResponse issueRequest(DescribeStoredQueriesRequest request)
+        throws IOException {
+        return (DescribeStoredQueriesResponse) internalIssueRequest(request);
+    }
+    
     public TransactionRequest createTransaction() {
         WFSStrategy strategy = getStrategy();
         return new TransactionRequest(config, strategy);
@@ -293,6 +332,15 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
         return new DescribeFeatureTypeRequest(config, getStrategy());
     }
 
+    public ListStoredQueriesRequest createListStoredQueriesRequest() {
+        return new ListStoredQueriesRequest(config, getStrategy());
+    }
+    
+    public DescribeStoredQueriesRequest createDescribeStoredQueriesRequest() {
+        return new DescribeStoredQueriesRequest(config, getStrategy());
+    }
+    
+    
     public DescribeFeatureTypeResponse issueRequest(DescribeFeatureTypeRequest request)
             throws IOException {
 
@@ -320,5 +368,9 @@ public class WFSClient extends AbstractOpenWebService<WFSGetCapabilities, QName>
         FeatureTypeInfo typeInfo = strategy.getFeatureTypeInfo(typeName);
         CoordinateReferenceSystem crs = typeInfo.getCRS();
         return crs;
+    }
+    
+    public String getAxisOrderFilter(){
+        return config.getAxisOrderFilter();
     }
 }

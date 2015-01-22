@@ -25,13 +25,14 @@ import java.util.Set;
 
 import javax.swing.Icon;
 
+import net.opengis.ows10.KeywordsType;
 import net.opengis.ows10.OnlineResourceType;
 import net.opengis.ows10.ServiceIdentificationType;
 import net.opengis.ows10.ServiceProviderType;
 import net.opengis.wfs.WFSCapabilitiesType;
 
 import org.geotools.data.ServiceInfo;
-import org.geotools.data.wfs.impl.WFSServiceInfo;
+import org.geotools.data.wfs.WFSServiceInfo;
 
 /**
  * Adapts a WFS capabilities document to {@link ServiceInfo}
@@ -83,9 +84,11 @@ public final class CapabilitiesServiceInfo implements WFSServiceInfo {
         ServiceIdentificationType serviceIdentification = capabilities.getServiceIdentification();
         if (serviceIdentification != null) {
             @SuppressWarnings("unchecked")
-            List<String> keywords = serviceIdentification.getKeywords();
+            List<KeywordsType> keywords = serviceIdentification.getKeywords();
             if (keywords != null) {
-                kws.addAll(keywords);
+                for (KeywordsType k : keywords) {
+                    kws.addAll(k.getKeyword());
+                }
                 kws.remove(null);
             }
         }

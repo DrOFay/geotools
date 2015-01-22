@@ -256,7 +256,7 @@ public abstract class RendererBaseTest {
      * @return
      * @throws IOException
      */
-    protected static Style loadStyle(Object loader, String sldFilename) throws IOException {
+    public static Style loadStyle(Object loader, String sldFilename) throws IOException {
         StyleFactory factory = CommonFactoryFinder.getStyleFactory(null);
 
         java.net.URL surl = TestData.getResource(loader, sldFilename);
@@ -333,6 +333,21 @@ public abstract class RendererBaseTest {
         Color actual = getPixelColor(image, i, j);
         
         Assert.assertEquals(color, actual);
+    }
+    
+    /**
+     * Checks the pixel i/j has the specified color
+     * @param image
+     * @param i
+     * @param j
+     * @param color
+     */
+    public static void assertPixel(BufferedImage image, int i, int j, Color color, int tolerance) {
+        Color actual = getPixelColor(image, i, j);
+        
+        Assert.assertTrue( Math.abs( color.getRed() - actual.getRed()) < tolerance );
+        Assert.assertTrue( Math.abs( color.getGreen() - actual.getGreen()) < tolerance );
+        Assert.assertTrue( Math.abs( color.getBlue() - actual.getBlue()) < tolerance );
     }
 
     /**

@@ -32,6 +32,7 @@ import javax.xml.namespace.QName;
 import org.geotools.data.DataSourceException;
 import org.geotools.data.wfs.internal.GetFeatureParser;
 import org.geotools.data.wfs.internal.Loggers;
+import org.geotools.data.wfs.internal.WFSConfig;
 import org.geotools.feature.simple.SimpleFeatureBuilder;
 import org.geotools.gml3.GML;
 import org.geotools.referencing.CRS;
@@ -70,10 +71,7 @@ import com.vividsolutions.jts.geom.Polygon;
  * 
  * 
  * 
- * @source $URL$
- *         http://svn.geotools.org/trunk/modules/plugin/wfs/src/main/java/org/geotools/wfs/v_1_1_0
- *         /data/XmlSimpleFeatureParser.java $ //@deprecated should be removed as long as
- *         {@link StreamingParserFeatureReader} works well
+ * //@deprecated should be removed as long as {@link PullParserFeatureReader} works well
  */
 @SuppressWarnings("nls")
 public class XmlSimpleFeatureParser implements GetFeatureParser {
@@ -97,17 +95,21 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
     private final Map<String, AttributeDescriptor> expectedProperties;
 
     private int numberOfFeatures = -1;
+    
+    private final String axisOrder;
 
     public XmlSimpleFeatureParser(final InputStream getFeatureResponseStream,
-            final SimpleFeatureType targetType, QName featureDescriptorName) throws IOException {
+            final SimpleFeatureType targetType, QName featureDescriptorName,
+            String axisOrder) throws IOException {
 
         //this.inputStream = new TeeInputStream(inputStream, System.err);
-        
+
         this.inputStream = getFeatureResponseStream;
         this.featureNamespace = featureDescriptorName.getNamespaceURI();
         this.featureName = featureDescriptorName.getLocalPart();
         this.targetType = targetType;
         this.builder = new SimpleFeatureBuilder(targetType);
+        this.axisOrder = axisOrder;
 
         XmlPullParserFactory factory;
         try {
@@ -119,7 +121,7 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
             parser = factory.newPullParser();
             parser.setInput(inputStream, "UTF-8");
             parser.nextTag();
-            parser.require(START_TAG, WFS.NAMESPACE, WFS.FeatureCollection.getLocalPart());
+            parser.require(START_TAG, null, WFS.FeatureCollection.getLocalPart());
 
             String nof = parser.getAttributeValue(null, "numberOfFeatures");
             if (nof != null) {
@@ -619,7 +621,7 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
             List<Coordinate> coords = new ArrayList<Coordinate>();
             int eventType;
             do {
-                point = parseCoordList(dimension);
+                point = parseCoordList(dimension, crs);
                 coords.add(point[0]);
                 parser.nextTag();
                 tagName = parser.getName();
@@ -631,10 +633,10 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
         } else if (GML.posList.equals(coordsName)) {
             // parser.require(START_TAG, GML.NAMESPACE,
             // GML.posList.getLocalPart());
-            lineCoords = parseCoordList(dimension);
+            lineCoords = parseCoordList(dimension, crs);
             parser.nextTag();
         } else if (GML.coordinates.equals(coordsName)) {
-            lineCoords = parseCoordinates(dimension);
+            lineCoords = parseCoordinates(dimension, crs);
             parser.nextTag();
         } else if (GML.coord.equals(coordsName)) {
             Coordinate point;
@@ -669,11 +671,11 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
         parser.require(START_TAG, GML.NAMESPACE, null);
         Coordinate point;
         if (GML.pos.getLocalPart().equals(parser.getName())) {
-            Coordinate[] coords = parseCoordList(dimension);
+            Coordinate[] coords = parseCoordList(dimension, crs);
             point = coords[0];
             parser.nextTag();
         } else if (GML.coordinates.getLocalPart().equals(parser.getName())) {
-            Coordinate[] coords = parseCoordinates(dimension);
+            Coordinate[] coords = parseCoordinates(dimension, crs);
             point = coords[0];
             parser.nextTag();
         } else if (GML.coord.getLocalPart().equals(parser.getName())) {
@@ -724,7 +726,7 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
             return defaultValue;
         }
         boolean forceXY = false;
-        if (srsName.startsWith("http://")) {
+        if (srsName.startsWith("http://") && srsName.indexOf('#') != -1) {
             forceXY = true;
             srsName = "EPSG:" + srsName.substring(1 + srsName.lastIndexOf('#'));
         } else if (srsName.startsWith("EPSG:")) {
@@ -743,32 +745,41 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
         return dimension;
     }
 
-    private Coordinate[] parseCoordList(int dimension) throws XmlPullParserException, IOException {
+    private Coordinate[] parseCoordList(int dimension, CoordinateReferenceSystem crs) throws XmlPullParserException, IOException {
         // we might be on a posList tag with srsDimension defined
         dimension = crsDimension(dimension);
         String rawTextValue = parser.nextText();
-        Coordinate[] coords = toCoordList(rawTextValue, dimension);
+        Coordinate[] coords = toCoordList(rawTextValue, dimension, crs);
         return coords;
     }
 
-    private Coordinate[] parseCoordinates(int dimension) throws XmlPullParserException, IOException {
+    private Coordinate[] parseCoordinates(int dimension, CoordinateReferenceSystem crs) throws XmlPullParserException, IOException {
         parser.require(START_TAG, GML.NAMESPACE, GML.coordinates.getLocalPart());
         // we might be on a posList tag with srsDimension defined
         dimension = crsDimension(dimension);
 
         String decimalSeparator = parser.getAttributeValue("", "decimal");
+        if (decimalSeparator == null) { //default
+            decimalSeparator = ".";
+        }
         String coordSeparator = parser.getAttributeValue("", "cs");
+        if (coordSeparator == null) { //default
+            coordSeparator = ",";
+        }
         String tupleSeparator = parser.getAttributeValue("", "ts");
+        if (tupleSeparator == null) { //default
+            tupleSeparator = " ";
+        }
 
         String rawTextValue = parser.nextText();
         Coordinate[] coords = toCoordList(rawTextValue, decimalSeparator, coordSeparator,
-                tupleSeparator, dimension);
+                tupleSeparator, dimension, crs);
 
         parser.require(END_TAG, GML.NAMESPACE, GML.coordinates.getLocalPart());
         return coords;
     }
 
-    private Coordinate[] toCoordList(String rawTextValue, final int dimension) {
+    private Coordinate[] toCoordList(String rawTextValue, final int dimension, CoordinateReferenceSystem crs) {
         rawTextValue = rawTextValue.trim();
         rawTextValue = rawTextValue.replaceAll("\n", " ");
         rawTextValue = rawTextValue.replaceAll("\r", " ");
@@ -778,6 +789,7 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
             throw new IllegalArgumentException("Number of ordinates (" + ordinatesLength
                     + ") does not match crs dimension: " + dimension);
         }
+        boolean invertXY = WFSConfig.invertAxisNeeded(axisOrder, crs);
         final int nCoords = ordinatesLength / dimension;
         Coordinate[] coords = new Coordinate[nCoords];
         Coordinate coord;
@@ -788,9 +800,17 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
             y = Double.valueOf(split[i + 1]);
             if (dimension > 2) {
                 z = Double.valueOf(split[i + 2]);
-                coord = new Coordinate(x, y, z);
+                if (invertXY) {
+                    coord = new Coordinate(y, x, z);
+                } else {
+                    coord = new Coordinate(x, y, z);
+                }
             } else {
-                coord = new Coordinate(x, y);
+                if (invertXY) {
+                    coord = new Coordinate(y, x);
+                } else {
+                    coord = new Coordinate(x, y);
+                }
             }
             coords[currCoordIdx] = coord;
             currCoordIdx++;
@@ -799,18 +819,18 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
     }
 
     private Coordinate[] toCoordList(String rawTextValue, final String decimalSeparator,
-            final String coordSeparator, final String tupleSeparator, final int dimension) {
+            final String coordSeparator, final String tupleSeparator, final int dimension, CoordinateReferenceSystem crs) {
 
-        rawTextValue = rawTextValue.trim();
-        rawTextValue = rawTextValue.replaceAll("\n", " ");
-        rawTextValue = rawTextValue.replaceAll("\r", " ");
+        rawTextValue = rawTextValue.replaceAll("[\n\r]", " ").trim();
 
-        String[] tuples = rawTextValue.trim().split("\\" + tupleSeparator + "+");
+        String[] tuples = rawTextValue.split("\\" + tupleSeparator + "+");
 
         final int nCoords = tuples.length;
 
         Coordinate[] coords = new Coordinate[nCoords];
         Coordinate coord;
+        
+        boolean invertXY = WFSConfig.invertAxisNeeded(axisOrder, crs);
 
         double x, y, z;
 
@@ -831,9 +851,17 @@ public class XmlSimpleFeatureParser implements GetFeatureParser {
             y = parsedOrdinates[1];
             if (dimension > 2 && parsedOrdinates.length > 2) {
                 z = parsedOrdinates[2];
-                coord = new Coordinate(x, y, z);
+                if (invertXY) {
+                    coord = new Coordinate(y, x, z);
+                } else {
+                    coord = new Coordinate(x, y, z);
+                }
             } else {
-                coord = new Coordinate(x, y);
+                if (invertXY) {
+                    coord = new Coordinate(y, x);
+                } else {
+                    coord = new Coordinate(x, y);
+                }
             }
             coords[i] = coord;
         }

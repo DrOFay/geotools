@@ -16,10 +16,26 @@
  */
 package org.geotools.data.sqlserver;
 
-import com.vividsolutions.jts.geom.*;
-import com.vividsolutions.jts.io.ParseException;
-import com.vividsolutions.jts.io.WKBReader;
-import com.vividsolutions.jts.io.WKTReader;
+import java.io.IOException;
+import java.sql.Connection;
+import java.sql.DatabaseMetaData;
+import java.sql.Date;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.sql.Time;
+import java.sql.Types;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.logging.Level;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.geotools.data.Query;
 import org.geotools.data.jdbc.FilterToSQL;
 import org.geotools.data.sqlserver.reader.SqlServerBinaryReader;
 import org.geotools.factory.Hints;
@@ -30,24 +46,30 @@ import org.geotools.referencing.CRS;
 import org.opengis.feature.simple.SimpleFeatureType;
 import org.opengis.feature.type.AttributeDescriptor;
 import org.opengis.feature.type.GeometryDescriptor;
+import org.opengis.filter.Filter;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
 import org.opengis.referencing.cs.CoordinateSystem;
 import org.opengis.referencing.cs.CoordinateSystemAxis;
 
-import java.io.IOException;
-import java.sql.*;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.UUID;
-import java.util.logging.Level;
+import com.vividsolutions.jts.geom.Envelope;
+import com.vividsolutions.jts.geom.Geometry;
+import com.vividsolutions.jts.geom.GeometryCollection;
+import com.vividsolutions.jts.geom.GeometryFactory;
+import com.vividsolutions.jts.geom.LineString;
+import com.vividsolutions.jts.geom.MultiLineString;
+import com.vividsolutions.jts.geom.MultiPoint;
+import com.vividsolutions.jts.geom.MultiPolygon;
+import com.vividsolutions.jts.geom.Point;
+import com.vividsolutions.jts.geom.Polygon;
+import com.vividsolutions.jts.io.ParseException;
+import com.vividsolutions.jts.io.WKBReader;
+import com.vividsolutions.jts.io.WKTReader;
+import com.vividsolutions.jts.io.WKTWriter;
 
 /**
  * Dialect implementation for Microsoft SQL Server.
  * 
  * @author Justin Deoliveira, OpenGEO
- *
- *
- *
  *
  * @source $URL$
  */
@@ -55,7 +77,16 @@ public class SQLServerDialect extends BasicSQLDialect {
 
     private static final int DEFAULT_AXIS_MAX = 10000000;
     private static final int DEFAULT_AXIS_MIN = -10000000;
+    static final String SPATIAL_INDEX_KEY = "SpatialIndex";
     
+    /**
+     * Pattern used to match the first FROM element in a SQL query, without matching
+     * also attributes containing FROM inside the name. We require to locate 
+     */
+    static final Pattern FROM_PATTERN = Pattern.compile("(\\s+)(FROM)(\\s)+", Pattern.DOTALL);
+    
+    static final Pattern POSITIVE_NUMBER = Pattern.compile("[1-9][0-9]*");
+
     /**
      * The direct geometry metadata table
      * @param dataStore
@@ -65,6 +96,10 @@ public class SQLServerDialect extends BasicSQLDialect {
 	private Boolean useOffsetLimit = false;
 
     private Boolean useNativeSerialization = false;
+    
+    private Boolean forceSpatialIndexes = false;
+
+    private String tableHints;
     
     final static Map<String, Class> TYPE_TO_CLASS_MAP = new HashMap<String, Class>() {
         {
@@ -275,7 +310,7 @@ public class SQLServerDialect extends BasicSQLDialect {
             // it's either a generic geography or geometry not registered in the medatata tables
             return Geometry.class;
         } else {
-            Class geometryClass = (Class) TYPE_TO_CLASS_MAP.get(gType.toUpperCase());
+            Class geometryClass = TYPE_TO_CLASS_MAP.get(gType.toUpperCase());
             if (geometryClass == null) {
                 geometryClass = Geometry.class;
             }
@@ -351,7 +386,6 @@ public class SQLServerDialect extends BasicSQLDialect {
         return null;
     }
     
-    
     @Override
     public Integer getGeometrySRID(String schemaName, String tableName,
             String columnName, Connection cx) throws SQLException {
@@ -395,6 +429,81 @@ public class SQLServerDialect extends BasicSQLDialect {
             dataStore.closeSafe( st );
         }
     }
+    
+    public Integer getGeometryDimensionFromMetadataTable(String schemaName, String tableName,
+            String columnName, Connection cx) throws SQLException {
+        
+        if(geometryMetadataTable == null) {
+            return null;
+        }
+
+        Statement statement = null;
+        ResultSet result = null;
+
+        try {
+            String schema = dataStore.getDatabaseSchema();
+            String sql = "SELECT COORD_DIMENSION FROM " + geometryMetadataTable + " WHERE " //
+                    + (schema == null ? "" : "F_TABLE_SCHEMA = '" + dataStore.getDatabaseSchema() + "' AND ") 
+                    + "F_TABLE_NAME = '" + tableName + "' ";//
+
+            LOGGER.log(Level.FINE, "Geometry dimension check; {0} ", sql);
+            statement = cx.createStatement();
+            result = statement.executeQuery(sql);
+
+            if (result.next()) {
+                return result.getInt(1);
+            }
+        } finally {
+            dataStore.closeSafe(result);
+            dataStore.closeSafe(statement);
+        }
+
+        return null;
+    }
+    
+    @Override
+    public int getGeometryDimension(String schemaName, String tableName, String columnName,
+            Connection cx) throws SQLException {
+        // try retrieve the dimension from geometryMetadataTable
+        Integer dimension = getGeometryDimensionFromMetadataTable(schemaName, tableName, columnName, cx);
+        if (dimension != null) {
+            return dimension;
+        }
+
+        // try retrieve dimension from the feature table
+        StringBuffer sql = new StringBuffer("SELECT TOP 1 ");
+        encodeColumnName(null, columnName, sql);
+        sql.append( ".STPointN(1).Z");
+        
+        sql.append( " FROM ");
+        encodeTableName(schemaName, tableName, sql, true);
+        
+        sql.append( " WHERE ");
+        encodeColumnName(null, columnName, sql );
+        sql.append( " IS NOT NULL");
+        
+        dataStore.getLogger().fine( sql.toString() );
+        
+        Statement st = cx.createStatement();
+        try {
+            
+            ResultSet rs = st.executeQuery( sql.toString() );
+            try {
+                if ( rs.next() ) {
+                    Object z = rs.getObject( 1 );
+                    return z == null ? 2 : 3;
+                }
+                // no dimension found, return the default 
+                return 2;
+            }
+            finally {
+                dataStore.closeSafe( rs );
+            }
+        }
+        finally {
+            dataStore.closeSafe( st );
+        }
+    }
 
     @Override
     public void encodeGeometryColumn(GeometryDescriptor gatt, String prefix,
@@ -406,7 +515,7 @@ public class SQLServerDialect extends BasicSQLDialect {
     }
 
     @Override
-    public void encodeGeometryValue(Geometry value, int srid, StringBuffer sql)
+    public void encodeGeometryValue(Geometry value, int dimension, int srid, StringBuffer sql)
             throws IOException {
         
         if ( value == null ) {
@@ -414,7 +523,11 @@ public class SQLServerDialect extends BasicSQLDialect {
             return;
         }
         
-        sql.append( "geometry::STGeomFromText('").append( value.toText() ).append( "',").append( srid ).append(")");
+        GeometryDimensionFinder finder = new GeometryDimensionFinder();
+        value.apply(finder);
+        WKTWriter writer = new WKTWriter(finder.hasZ() ? 3 : 2);
+        String wkt = writer.write(value);
+        sql.append( "geometry::STGeomFromText('").append( wkt ).append( "',").append( srid ).append(")");
     }
     
     @Override
@@ -460,15 +573,16 @@ public class SQLServerDialect extends BasicSQLDialect {
             throw (IOException) new IOException().initCause( e );
         }
         
-        CoordinateReferenceSystem crs;
-        try {
-            crs = CRS.decode( "EPSG:" + srid );
-        } 
-        catch (Exception e ) {
-            throw (IOException) new IOException().initCause( e );
+        if (srid != null && POSITIVE_NUMBER.matcher(srid).matches()) {
+            CoordinateReferenceSystem crs;
+            try {
+                crs = CRS.decode("EPSG:" + srid);
+            } catch (Exception e) {
+                throw (IOException) new IOException().initCause(e);
+            }
+
+            g.setUserData(crs);
         }
-        
-        g.setUserData( crs );
         return g;
     }
 
@@ -560,38 +674,51 @@ public class SQLServerDialect extends BasicSQLDialect {
     
     @Override
     public void applyLimitOffset(StringBuffer sql, int limit, int offset) {
-        // if we have a nested query (used in sql views) we might have a inner order by,
-        // check for the last closed )
-        int lastClosed = sql.lastIndexOf(")");
-        int orderByIndex = sql.lastIndexOf("ORDER BY");
-        CharSequence orderBy;
-        if(orderByIndex > 0 && orderByIndex > lastClosed) {
-            // we'll move the order by into the ROW_NUMBER call
-            orderBy = sql.subSequence(orderByIndex, sql.length());
-            sql.delete(orderByIndex, orderByIndex + orderBy.length());
+        if(offset == 0) {
+            int idx = getAfterSelectInsertPoint(sql.toString());
+            sql.insert(idx, " top "  + limit);
         } else {
-            // ROW_NUMBER requires an order by clause, we need to feed it something
-            orderBy = "ORDER BY CURRENT_TIMESTAMP";
-        }
-        
-        // now insert the order by inside the select
-        int fromStart = sql.indexOf("FROM");
-        sql.insert(fromStart - 1, ", ROW_NUMBER() OVER (" + orderBy + ") AS _GT_ROW_NUMBER ");
-        
-        // and wrap inside a block that selects the portion we want
-        sql.insert(0, "SELECT * FROM (");
-        sql.append(") AS _GT_PAGING_SUBQUERY WHERE ");
-        if(offset > 0) {
-            sql.append("_GT_ROW_NUMBER > " + offset);
-        }
-        if(limit >= 0 && limit < Integer.MAX_VALUE) {
-            int max = limit;
-            if(offset > 0) {
-                max += offset;
-                sql.append(" AND ");
+            // if we have a nested query (used in sql views) we might have a inner order by,
+            // check for the last closed )
+            int lastClosed = sql.lastIndexOf(")");
+            int orderByIndex = sql.lastIndexOf("ORDER BY");
+            CharSequence orderBy;
+            if(orderByIndex > 0 && orderByIndex > lastClosed) {
+                // we'll move the order by into the ROW_NUMBER call
+                orderBy = sql.subSequence(orderByIndex, sql.length());
+                sql.delete(orderByIndex, orderByIndex + orderBy.length());
+            } else {
+                // ROW_NUMBER requires an order by clause, we need to feed it something
+                orderBy = "ORDER BY CURRENT_TIMESTAMP";
             }
-            sql.append("_GT_ROW_NUMBER <= " + max);
+            
+            // now insert the order by inside the select
+            Matcher fromMatcher = FROM_PATTERN.matcher(sql);
+            fromMatcher.find();
+            int fromStart = fromMatcher.start(2);
+            sql.insert(fromStart - 1, ", ROW_NUMBER() OVER (" + orderBy + ") AS _GT_ROW_NUMBER ");
+            
+            // and wrap inside a block that selects the portion we want
+            sql.insert(0, "SELECT * FROM (");
+            sql.append(") AS _GT_PAGING_SUBQUERY WHERE ");
+            if(offset > 0) {
+                sql.append("_GT_ROW_NUMBER > " + offset);
+            }
+            if(limit >= 0 && limit < Integer.MAX_VALUE) {
+                int max = limit;
+                if(offset > 0) {
+                    max += offset;
+                    sql.append(" AND ");
+                }
+                sql.append("_GT_ROW_NUMBER <= " + max);
+            }
         }
+    }
+    
+    int getAfterSelectInsertPoint(String sql) {
+        final int selectIndex = sql.toLowerCase().indexOf( "select" );
+        final int selectDistinctIndex = sql.toLowerCase().indexOf( "select distinct" );
+        return selectIndex + (selectDistinctIndex == selectIndex ? 15 : 6);
     }
     
     @Override
@@ -640,5 +767,204 @@ public class SQLServerDialect extends BasicSQLDialect {
     public void setUseNativeSerialization(Boolean useNativeSerialization) {
         this.useNativeSerialization = useNativeSerialization;
     }
-	
+    
+    /**
+     * Sets whether to force the usage of spatial indexes by including a WITH INDEX hint
+     * @param useNativeSerialization
+     */
+    public void setForceSpatialIndexes(boolean forceSpatialIndexes) {
+        this.forceSpatialIndexes = forceSpatialIndexes;
+    }
+    
+    /**
+     * Sets a comma separated list of table hints that will be added to every select query
+     * 
+     * @param tableHints
+     */
+    public void setTableHints(String tableHints) {
+        if (tableHints == null) {
+            this.tableHints = null;
+        } else {
+            tableHints = tableHints.trim();
+            if (tableHints.isEmpty()) {
+                this.tableHints = null;
+            } else {
+                this.tableHints = tableHints;
+            }
+        }
+    }
+
+    /**
+     * Drop the index. Subclasses can override to handle extra syntax or db specific situations
+     * 
+     * @param cx
+     * @param schema
+     * @param databaseSchema
+     * @param indexName
+     * @throws SQLException
+     */
+    public void dropIndex(Connection cx, SimpleFeatureType schema, String databaseSchema,
+            String indexName) throws SQLException {
+        StringBuffer sql = new StringBuffer();
+        String escape = getNameEscape();
+        sql.append("DROP INDEX ");
+        sql.append(escape).append(indexName).append(escape);
+        sql.append(" ON ");
+        if (databaseSchema != null) {
+            encodeSchemaName(databaseSchema, sql);
+            sql.append(".");
+        }
+        sql.append(escape).append(schema.getTypeName()).append(escape);
+
+        Statement st = null;
+        try {
+            st = cx.createStatement();
+            st.execute(sql.toString());
+            if(!cx.getAutoCommit()) {
+                cx.commit();
+            }
+        } finally {
+            dataStore.closeSafe(cx);
+        }
+    }
+
+    @Override
+    public void postCreateFeatureType(SimpleFeatureType featureType, DatabaseMetaData md,
+            String databaseSchema, Connection cx) throws SQLException {
+        // collect the spatial indexes (index metadata does not work properly for spatial indexes)
+        String sql = "SELECT \n" + 
+                "     index_name = ind.name,\n" + 
+                "     column_name = col.name\n" + 
+                "FROM \n" + 
+                "     sys.indexes ind \n" + 
+                "INNER JOIN \n" + 
+                "     sys.index_columns ic ON  ind.object_id = ic.object_id and ind.index_id = ic.index_id \n" + 
+                "INNER JOIN \n" + 
+                "     sys.columns col ON ic.object_id = col.object_id and ic.column_id = col.column_id \n" + 
+                "INNER JOIN \n" + 
+                "     sys.tables t ON ind.object_id = t.object_id \n" + 
+                "WHERE \n" + 
+                "     ind.type_desc = 'SPATIAL'\n" + 
+                "     and t.name = '" + featureType.getTypeName() + "'";
+        ResultSet indexInfo = null;
+        Statement st = null;
+        Map<String, Set<String>> indexes = new HashMap<String, Set<String>>();
+        try {
+            st = cx.createStatement();
+            indexInfo = st.executeQuery(sql);
+            while (indexInfo.next()) {
+                String indexName = indexInfo.getString("index_name");
+                String columnName = indexInfo.getString("column_name");
+                Set<String> indexColumns = indexes.get(indexName);
+                if (indexColumns == null) {
+                    indexColumns = new HashSet<String>();
+                    indexes.put(indexName, indexColumns);
+                } 
+                indexColumns.add(columnName);
+            }
+        } finally {
+            dataStore.closeSafe(st);
+            dataStore.closeSafe(indexInfo);
+        }
+        
+        // search for single column spatial indexes and attach them to the descriptors
+        for (Map.Entry<String, Set<String>> entry : indexes.entrySet()) {
+            Set<String> columns = entry.getValue();
+            if(columns.size() == 1) {
+                String column = columns.iterator().next();
+                AttributeDescriptor descriptor = featureType.getDescriptor(column);
+                if(descriptor instanceof GeometryDescriptor) {
+                    descriptor.getUserData().put(SPATIAL_INDEX_KEY, entry.getKey());
+                }
+            }
+        }
+    }
+    
+    @Override
+    public void handleSelectHints(StringBuffer sql, SimpleFeatureType featureType, Query query) {
+        // optional feature, apply only if requested
+        if (!forceSpatialIndexes && tableHints == null) {
+            return;
+        }
+        
+        // apply the index hints
+        String fromStatement;
+        String typeName = featureType.getTypeName();
+        String schema = dataStore.getDatabaseSchema();
+        if (schema == null) {
+            fromStatement = "FROM \"" + typeName + "\"";
+        } else {
+            fromStatement = "FROM \"" + schema + "\".\""
+                    + typeName + "\"";
+        }
+        int idx = sql.indexOf(fromStatement);
+        if(idx > 0) {
+            int base = idx + fromStatement.length();
+            StringBuilder sb = new StringBuilder(" WITH(");
+            // check the spatial index hints
+            Set<String> indexes = getSpatialIndexes(featureType, query);
+            if (!indexes.isEmpty()) {
+                sb.append("INDEX(");
+                for (String indexName : indexes) {
+                    sb.append("\"").append(indexName).append("\"").append(",");
+                }
+                sb.setLength(sb.length() - 1);
+                sb.append(")");
+            } else if(tableHints == null) {
+                // no spatial indexes, and we don't have anything else to add either
+                return;
+            }
+            // do we need a comma between spatial index hints and other table hints?
+            if (!indexes.isEmpty() && tableHints != null) {
+                sb.append(", ");
+            }
+            // other table hints
+            if (tableHints != null) {
+                sb.append(tableHints);
+            }
+            sb.append(")");
+
+            // finally insert the table hints
+            String tableHint = sb.toString();
+            sql.insert(base, tableHint);
+        }
+    }
+
+    private Set<String> getSpatialIndexes(SimpleFeatureType featureType, Query query) {
+        if (!forceSpatialIndexes) {
+            return Collections.emptySet();
+        }
+
+        // check we have a filter
+        Filter filter = query.getFilter();
+        if(filter == Filter.INCLUDE) {
+            return Collections.emptySet();
+        }
+        
+        // that is has spatial attributes
+        SpatialIndexAttributeExtractor attributesExtractor = new SpatialIndexAttributeExtractor();
+        filter.accept(attributesExtractor, null);
+        Map<String, Integer> attributes = attributesExtractor.getSpatialProperties();
+        if(attributes.isEmpty() || attributes.size() > 1) {
+            return Collections.emptySet();
+        }
+        
+        // and that those attributes have a spatial index
+        Set<String> indexes = new HashSet<String>();
+        for (Map.Entry<String, Integer> attribute : attributes.entrySet()) {
+            // we can only apply one index on one condition
+            if(attribute.getValue() > 1) {
+                continue;
+            }
+            AttributeDescriptor descriptor = featureType.getDescriptor(attribute.getKey());
+            if(descriptor instanceof GeometryDescriptor) {
+                String indexName = (String) descriptor.getUserData().get(SPATIAL_INDEX_KEY);
+                if(indexName != null) {
+                    indexes.add(indexName);
+                }
+            }
+        }
+        return indexes;
+    }
+
 }

@@ -18,9 +18,9 @@ package org.geotools.geojson;
 
 import java.io.ByteArrayOutputStream;
 import java.io.StringWriter;
-import java.util.Iterator;
 import java.util.List;
 
+import org.geotools.data.simple.SimpleFeatureCollection;
 import org.geotools.feature.DefaultFeatureCollection;
 import org.geotools.feature.FeatureCollection;
 import org.geotools.feature.FeatureIterator;
@@ -29,6 +29,7 @@ import org.geotools.feature.simple.SimpleFeatureTypeBuilder;
 import org.geotools.geojson.feature.FeatureJSON;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.referencing.CRS;
+import org.junit.Test;
 import org.opengis.feature.simple.SimpleFeature;
 import org.opengis.feature.simple.SimpleFeatureType;
 import org.opengis.referencing.crs.CoordinateReferenceSystem;
@@ -539,6 +540,49 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
         assertEquals(strip(collectionText(false, true)), fjson.toString(collection()));
     }
 
+    public void testFeatureCollectionWithNonWGS84CRSWrite() throws Exception {
+        String json =
+            "{" +
+            "  'type': 'FeatureCollection'," +
+            "  'crs': {" +
+            "    'type': 'name'," +
+            "    'properties': {" +
+            "      'name': 'EPSG:3857'" +
+            "    }" +
+            "  }," +
+            "  'features': [" +
+            "    {" +
+            "      'type': 'Feature'," +
+            "      'geometry': {" +
+            "        'type': 'Point', " +
+            "        'coordinates': [2.003750834E7, 2.003750834E7]" +
+            "      }," +
+            "      'properties': {" +
+            "      }," +
+            "      'id': 'xyz.1'" +
+            "    }" +
+            "  ]" +
+            "}";
+
+        SimpleFeatureTypeBuilder tb = new SimpleFeatureTypeBuilder();
+        tb.add("geom", Point.class, CRS.decode("EPSG:3857"));
+        tb.add("name", String.class);
+        tb.setName("xyz");
+        SimpleFeatureType schema = tb.buildFeatureType();
+
+        DefaultFeatureCollection fc = new DefaultFeatureCollection();
+
+        SimpleFeatureBuilder fb = new SimpleFeatureBuilder(schema);
+        fb.add(new WKTReader().read("POINT(20037508.34 20037508.34)"));
+        fc.add(fb.buildFeature("xyz.1"));
+
+        FeatureJSON fj = new FeatureJSON();
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+        fj.writeFeatureCollection(fc, os);
+
+        assertEquals(strip(json), os.toString());
+    }
+
     public void testFeatureCollectionWithCRSRead() throws Exception {
         String json = collectionText(true, true);
         FeatureCollection fcol = fjson.readFeatureCollection(strip(collectionText(true, true)));
@@ -549,10 +593,88 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
             assertNotNull(it.next().getType().getCoordinateReferenceSystem());
         }
     }
+    
+    public void testFeatureCollectionWithMissingAttributeRead() throws Exception {
+      String collectionText = collectionText(true, true, false, true, false);
+      SimpleFeatureType ftype = fjson.readFeatureCollectionSchema((strip(collectionText)), false);
+      
+      assertNotNull(ftype.getDescriptor("double"));
+      assertEquals(Double.class, ftype.getDescriptor("double").getType().getBinding());
+      assertNotNull(ftype.getDescriptor("int"));
+      assertEquals(Long.class, ftype.getDescriptor("int").getType().getBinding());
+      assertNotNull(ftype.getDescriptor("string"));
+      assertEquals(String.class, ftype.getDescriptor("string").getType().getBinding());
+      
+      assertNotNull(ftype.getCoordinateReferenceSystem());
+      
+      fjson.setFeatureType(ftype);
+      SimpleFeatureCollection fcol = (SimpleFeatureCollection) fjson.readFeatureCollection((strip(collectionText)));
+      
+      assertEquals(ftype, fcol.getSchema());
+      
+      FeatureIterator it = fcol.features();
+      while(it.hasNext()) {
+        assertEquals(ftype, it.next().getType());
+      }
+    }
+    
+    @Test
+    public void testFeatureCollectionWithNullAttributeRead() throws Exception {
+      String collectionText = collectionText(true, true, false, false, true);
+      SimpleFeatureType ftype = fjson.readFeatureCollectionSchema((strip(collectionText)), true);
+      
+      System.out.println("type: " + ftype);
+      
+      assertEquals(4, ftype.getAttributeCount());
+      
+      assertNotNull(ftype.getDescriptor("int"));
+      assertEquals(Long.class, ftype.getDescriptor(1).getType().getBinding());
+      assertNotNull(ftype.getDescriptor("double"));
+      assertEquals(Double.class, ftype.getDescriptor(2).getType().getBinding());
+      assertNotNull(ftype.getDescriptor("string"));
+      assertEquals(String.class, ftype.getDescriptor(3).getType().getBinding());
+      
+      assertNotNull(ftype.getCoordinateReferenceSystem());
+      
+      fjson.setFeatureType(ftype);
+      SimpleFeatureCollection fcol = (SimpleFeatureCollection) fjson.readFeatureCollection((strip(collectionText)));
+      
+      assertEquals(ftype, fcol.getSchema());
+      
+      FeatureIterator it = fcol.features();
+      while(it.hasNext()) {
+        assertEquals(ftype, it.next().getType());
+      }
+    }
+    
+    public void testFeatureCollectionWithNullAttributeAllFeaturesRead() throws Exception {
+      String collectionText = collectionText(true, true, false, false, false, true);
+      SimpleFeatureType ftype = fjson.readFeatureCollectionSchema((strip(collectionText)), false);
+      
+      assertNotNull(ftype.getDescriptor("double"));
+      // type defaults to String as all values were null
+      assertEquals(String.class, ftype.getDescriptor("double").getType().getBinding());
+      assertNotNull(ftype.getDescriptor("int"));
+      assertEquals(Long.class, ftype.getDescriptor("int").getType().getBinding());
+      assertNotNull(ftype.getDescriptor("string"));
+      assertEquals(String.class, ftype.getDescriptor("string").getType().getBinding());
+      
+      assertNotNull(ftype.getCoordinateReferenceSystem());
+      
+      fjson.setFeatureType(ftype);
+      SimpleFeatureCollection fcol = (SimpleFeatureCollection) fjson.readFeatureCollection((strip(collectionText)));
+      
+      assertEquals(ftype, fcol.getSchema());
+      
+      FeatureIterator it = fcol.features();
+      while(it.hasNext()) {
+        assertEquals(ftype, it.next().getType());
+      }
+    }
 
     public void testFeatureCollectionWithCRSPostFeaturesRead() throws Exception {
         String json = collectionText(true, true);
-        FeatureCollection fcol = fjson.readFeatureCollection(strip(collectionText(true, true, true)));
+        FeatureCollection fcol = fjson.readFeatureCollection(strip(collectionText(true, true, true, false, false)));
         assertNotNull(fcol.getSchema().getCoordinateReferenceSystem());
 
         FeatureIterator it = fcol.features();
@@ -579,6 +701,13 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
         it.close();
     }
 
+    public void testEmptyFeatureCollection() throws Exception {
+        String json = strip("{'type':'FeatureCollection','features':[]}");
+        FeatureCollection fcol = fjson.readFeatureCollection(json);
+        assertNull(fcol.getSchema());
+        assertTrue(fcol.isEmpty());
+    }
+
     public void testCRSWrite() throws Exception {
         CoordinateReferenceSystem crs = CRS.decode("EPSG:4326");
         StringWriter writer = new StringWriter();
@@ -591,7 +720,20 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
         Object crs = fjson.readCRS(reader(strip(crsText())));
         assertTrue(CRS.equalsIgnoreMetadata(CRS.decode("epsg:4326"), crs));
     }
-    
+
+    public void testFeatureCollectionWithNullBoundsWrite() throws Exception {
+        DefaultFeatureCollection features = new DefaultFeatureCollection() {
+            @Override
+            public ReferencedEnvelope getBounds() {
+                return null;
+            }
+        };
+        features.add(feature(0));
+
+        String json = fjson.toString(features);
+
+    }
+
     String crsText() {
         return 
             "{" + 
@@ -611,7 +753,31 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
         return fb.buildFeature("feature." + val);
     }
     
+    SimpleFeature featureMissingAttribute(int val) {
+      fb.add(val);
+      fb.add(val + 0.1);
+      fb.add(new GeometryFactory().createPoint(new Coordinate(val+0.1,val+0.1)));
+      
+      return fb.buildFeature("feature." + val);
+    }
+    
+    SimpleFeature featureNullAttribute(int val) {
+      fb.add(val);
+      fb.add(null);
+      fb.add(toString(val));
+      fb.add(new GeometryFactory().createPoint(new Coordinate(val+0.1,val+0.1)));
+      
+      return fb.buildFeature("feature." + val);
+    }
+    
     String featureText(int val) {
+      return featureText(val, false, false);
+    }
+    
+    String featureText(int val, boolean missingAttribute, boolean nullAttribute) {
+        if (missingAttribute && nullAttribute) {
+          throw new IllegalArgumentException("For tests, use only one of either missingAttribute or nullAttribute");
+        }
         String text = 
         "{" +
         "  'type': 'Feature'," +
@@ -621,7 +787,8 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
         "   }, " +
         "'  properties': {" +
         "     'int': " + val + "," +
-        "     'double': " + (val + 0.1) + "," +
+        (missingAttribute ? "" : (nullAttribute ? ("     'double': null,") : (
+        "     'double': " + (val + 0.1) + ","))) +
         "     'string': '" + toString(val) + "'" + 
         "   }," +
         "   'id':'feature." + val + "'" +
@@ -643,10 +810,14 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
     }
     
     String collectionText(boolean withBounds, boolean withCRS) {
-        return collectionText(withBounds, withCRS, false);
+        return collectionText(withBounds, withCRS, false, false, false, false);
     }
     
-    String collectionText(boolean withBounds, boolean withCRS, boolean crsAfter) {
+    String collectionText(boolean withBounds, boolean withCRS, boolean crsAfter, boolean missingFirstFeatureAttribute, boolean nullFirstFeatureAttribute) {
+      return collectionText(withBounds, withCRS, crsAfter, missingFirstFeatureAttribute, nullFirstFeatureAttribute, false);
+    }
+
+    String collectionText(boolean withBounds, boolean withCRS, boolean crsAfter, boolean missingFirstFeatureAttribute, boolean nullFirstFeatureAttribute, boolean nullAttributeAllFeatures) {
         StringBuffer sb = new StringBuffer();
         sb.append("{'type':'FeatureCollection',");
         if (withBounds) {
@@ -666,8 +837,17 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
             sb.append("},");
         }
         sb.append("'features':[");
-        for (int i = 0; i < 3; i++) {
-            sb.append(featureText(i)).append(",");
+        if (nullAttributeAllFeatures) {
+            // creates all features with a null attribute
+            for (int i = 0; i < 3; i++) {
+                sb.append(featureText(i, false, true)).append(",");
+            }
+        } else {
+            // only the first feature will have a null or missing attribute
+            sb.append(featureText(0, missingFirstFeatureAttribute, nullFirstFeatureAttribute)).append(",");
+            for (int i = 1; i < 3; i++) {
+                sb.append(featureText(i, false, false)).append(",");
+            }
         }
         sb.setLength(sb.length()-1);
         sb.append("]");
@@ -682,5 +862,4 @@ public class FeatureJSONTest extends GeoJSONTestSupport {
         sb.append("}");
         return sb.toString();
     }
-    
 }

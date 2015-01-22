@@ -1,3 +1,19 @@
+/*
+ *    GeoTools - The Open Source Java GIS Toolkit
+ *    http://geotools.org
+ *
+ *    (C) 2008-2014, Open Source Geospatial Foundation (OSGeo)
+ *
+ *    This library is free software; you can redistribute it and/or
+ *    modify it under the terms of the GNU Lesser General Public
+ *    License as published by the Free Software Foundation;
+ *    version 2.1 of the License.
+ *
+ *    This library is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *    Lesser General Public License for more details.
+ */
 package org.geotools.data.wfs.internal;
 
 import java.io.UnsupportedEncodingException;
@@ -30,7 +46,6 @@ public class URIs {
 
         // prepare modifiable parameters
         StringBuilder baseURLBuffer = new StringBuilder(baseURL);
-        StringBuilder pathBuffer = new StringBuilder(path != null ? path : "");
 
         Map<String, String> kvpBuffer = new LinkedHashMap<String, String>();
         if (kvp != null) {
@@ -38,7 +53,13 @@ public class URIs {
         }
 
         // compose the final URL
-        String result = appendContextPath(baseURLBuffer.toString(), pathBuffer.toString());
+        String result;
+        if (path != null) {
+            result = appendContextPath(baseURLBuffer.toString(), path);
+        } else {
+            result = baseURLBuffer.toString();
+        }
+        
         StringBuilder params = new StringBuilder();
         for (Map.Entry<String, String> entry : kvpBuffer.entrySet()) {
             params.append(entry.getKey());

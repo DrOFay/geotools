@@ -16,7 +16,7 @@
  */
 package org.geotools.data.jdbc;
 
-import static org.geotools.filter.capability.FunctionNameImpl.*;
+import static org.geotools.filter.capability.FunctionNameImpl.parameter;
 
 import java.io.IOException;
 import java.io.StringWriter;
@@ -65,7 +65,6 @@ import org.opengis.filter.PropertyIsLike;
 import org.opengis.filter.PropertyIsNil;
 import org.opengis.filter.PropertyIsNotEqualTo;
 import org.opengis.filter.PropertyIsNull;
-import org.opengis.filter.capability.FunctionName;
 import org.opengis.filter.expression.Add;
 import org.opengis.filter.expression.BinaryExpression;
 import org.opengis.filter.expression.Divide;
@@ -198,6 +197,9 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
     
     /** the srid corresponding to the current binary spatial filter being encoded */
     protected Integer currentSRID;
+
+    /** The dimension corresponding to the current binary spatial filter being encoded */
+    protected Integer currentDimension;
 
     /** inline flag, controlling whether "WHERE" will prefix the SQL encoded filter */
     protected boolean inline = false;
@@ -555,9 +557,15 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
      */
     public Object visit(Not filter, Object extraData) {
         try {
-            out.write("NOT (");
-            filter.getFilter().accept(this, extraData);
-            out.write(")");
+            if(filter.getFilter() instanceof PropertyIsNull) {
+                Expression expr = ((PropertyIsNull) filter.getFilter()).getExpression();
+                expr.accept(this, extraData);
+                out.write(" IS NOT NULL ");
+            } else {
+                out.write("NOT (");
+                filter.getFilter().accept(this, extraData);
+                out.write(")");
+            }
             return extraData;
         }
         catch(IOException e) {
@@ -884,8 +892,11 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
             colNames[i] = mapper.getColumnName(i);
         }
 
-        for (Iterator i = ids.iterator(); i.hasNext(); ) {
-            try {
+        try {
+            if (ids.size() > 1) {
+                out.write("(");
+            }
+            for (Iterator i = ids.iterator(); i.hasNext();) {
                 Identifier id = (Identifier) i.next();
                 Object[] attValues = mapper.getPKAttributes(id.toString());
 
@@ -907,11 +918,15 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
                 if (i.hasNext()) {
                     out.write(" OR ");
                 }
-            } catch (java.io.IOException e) {
-                throw new RuntimeException(IO_ERROR, e);
             }
+            if (ids.size() > 1) {
+                out.write(")");
+            }
+        } catch (java.io.IOException e) {
+            throw new RuntimeException(IO_ERROR, e);
         }
         
+
         return extraData;
     }
     
@@ -955,15 +970,15 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
         if (filter == null)
             throw new NullPointerException(
                     "Filter to be encoded cannot be null");
-        if (!(filter instanceof BinaryComparisonOperator))
+        if (!(filter instanceof BinarySpatialOperator))
             throw new IllegalArgumentException(
-                    "This filter is not a binary comparison, "
+                    "This filter is not a binary spatial operator, "
                             + "can't do SDO relate against it: "
                             + filter.getClass());
 
         
         // extract the property name and the geometry literal
-        BinaryComparisonOperator op = (BinaryComparisonOperator) filter;
+        BinarySpatialOperator op = (BinarySpatialOperator) filter;
         Expression e1 = op.getExpression1();
         Expression e2 = op.getExpression2();
 
@@ -976,6 +991,7 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
             // handle native srid
             currentGeometry = null;
             currentSRID = null;
+            currentDimension = null;
             if (featureType != null) {
                 // going thru evaluate ensures we get the proper result even if the
                 // name has
@@ -985,6 +1001,8 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
                     currentGeometry = (GeometryDescriptor) descriptor;
                     currentSRID = (Integer) descriptor.getUserData().get(
                             JDBCDataStore.JDBC_NATIVE_SRID);
+                    currentDimension = (Integer) descriptor.getUserData().get(
+                            Hints.COORDINATE_DIMENSION);
                 }
             }
         }
@@ -1338,6 +1356,10 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
             // use the target type
             if (Number.class.isAssignableFrom(target)) {
                 literal = safeConvertToNumber(expression, target);
+
+                if (literal == null) {
+                    literal = safeConvertToNumber(expression, Number.class);
+                }
             }
             else {
                 literal = expression.evaluate(null, target);
