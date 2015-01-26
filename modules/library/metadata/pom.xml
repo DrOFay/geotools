@@ -25,7 +25,7 @@
   <!-- =========================================================== -->
   <groupId>org.geotools</groupId>
   <artifactId>gt-metadata</artifactId>
-  <packaging>jar</packaging>
+  <packaging>bundle</packaging>
   <name>Metadata</name>
   
 
@@ -35,7 +35,7 @@
   </scm>
 
   <description>
-    Contains implementations of metadata and some core utilities classes.
+    Contains implementations of metadata and some core utilities classes.  This module is OSGi compliant.
   </description>
 
   <licenses>
@@ -93,6 +93,12 @@
         <role>Java developper</role>
       </roles>
     </contributor>
+    <contributor>
+      <name>David Fay</name>
+      <roles>
+        <role>Java/OSGi Developer</role>
+      </roles>
+    </contributor>
   </contributors>
 
   <!-- =========================================================== -->
@@ -111,27 +117,115 @@
       (in which case he should put this dependency explicitly on the classpath).
     -->
     <dependency>
-      <groupId>javax.media</groupId>
-      <artifactId>jai_core</artifactId>
-      <!-- The version number is specified in the parent POM. -->
+        <groupId>javax.media.jai</groupId>
+        <artifactId>com.springsource.javax.media.jai.core</artifactId>
+        <version>1.1.3</version>
     </dependency>
     <dependency>
-      <groupId>commons-logging</groupId>
-      <artifactId>commons-logging</artifactId>
-      <!-- The version number is specified in the parent POM. -->
-      <scope>provided</scope>  <!-- Not required for default execution. -->
+        <groupId>org.apache.commons</groupId>
+        <artifactId>com.springsource.org.apache.commons.logging</artifactId>
+        <version>1.1.1</version>
+        <scope>provided</scope>  <!-- Not required for default execution. -->
       <optional>true</optional>
     </dependency>
     <dependency>
-      <groupId>log4j</groupId>
-      <artifactId>log4j</artifactId>
-      <scope>provided</scope>  <!-- Not required for default execution. -->
+        <groupId>org.apache.log4j</groupId>
+        <artifactId>com.springsource.org.apache.log4j</artifactId>
+        <version>1.2.16</version>
+        <scope>provided</scope>  <!-- Not required for default execution. -->
       <optional>true</optional>
     </dependency>
   </dependencies>
 
   <build>
-    <resources>
+      <plugins>
+          <!-- for information on this plugin, visit http://felix.apache.org/site/apache-felix-maven-bundle-plugin-bnd.html -->
+          <plugin>
+              <groupId>org.apache.felix</groupId>
+              <artifactId>maven-bundle-plugin</artifactId>
+              <version>2.3.7</version>
+              <extensions>true</extensions>
+              <configuration>
+                  <unpackBundle>true</unpackBundle>
+                  <supportedProjectTypes>
+                      <supportedProjectType>war</supportedProjectType>
+                      <supportedProjectType>jar</supportedProjectType>
+                      <supportedProjectType>bundle</supportedProjectType>
+                  </supportedProjectTypes>
+                  <instructions>
+                      <Application-TraceLevels>*=info</Application-TraceLevels>
+                      <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
+                      <Import-Package>
+                          javax.imageio.spi
+                          ,javax.measure.unit
+                          ,javax.measure.quantity
+                          ,javax.measure.converter
+                          ,javax.media.jai
+                          ,javax.media.jai.util
+                          ,javax.naming
+                          ,javax.sql
+                          ,javax.swing
+                          ,javax.swing.border
+                          ,javax.swing.event
+                          ,javax.swing.filechooser
+                          ,javax.swing.text
+                          ,javax.swing.tree
+                          ,javax.vecmath
+                          ,org.apache.commons.logging
+                          ,org.apache.commons.logging.impl
+                          ,org.apache.log4j
+                          ,org.opengis.annotation
+                          ,org.opengis.feature.type
+                          ,org.opengis.geometry
+                          ,org.opengis.geometry.primitive
+                          ,org.opengis.metadata
+                          ,org.opengis.metadata.citation
+                          ,org.opengis.metadata.constraint
+                          ,org.opengis.metadata.content
+                          ,org.opengis.metadata.distribution
+                          ,org.opengis.metadata.extent
+                          ,org.opengis.metadata.identification
+                          ,org.opengis.metadata.lineage
+                          ,org.opengis.metadata.maintenance
+                          ,org.opengis.metadata.quality
+                          ,org.opengis.metadata.spatial
+                          ,org.opengis.referencing
+                          ,org.opengis.referencing.crs
+                          ,org.opengis.referencing.datum
+                          ,org.opengis.referencing.operation
+                          ,org.opengis.temporal
+                          ,org.opengis.util
+                          ,org.w3c.dom
+                      </Import-Package>
+                      <Export-Package>
+                          org.geotools.console;version="${project.version}"
+                          ,org.geotools.factory;version="${project.version}"
+                          ,org.geotools.io;version="${project.version}"
+                          ,org.geotools.math;version="${project.version}"
+                          ,org.geotools.metadata;version="${project.version}"
+                          ,org.geotools.metadata.iso;version="${project.version}"
+                          ,org.geotools.metadata.iso.citation;version="${project.version}"
+                          ,org.geotools.metadata.iso.constraint;version="${project.version}"
+                          ,org.geotools.metadata.iso.content;version="${project.version}"
+                          ,org.geotools.metadata.iso.distribution;version="${project.version}"
+                          ,org.geotools.metadata.iso.extent;version="${project.version}"
+                          ,org.geotools.metadata.iso.identification;version="${project.version}"
+                          ,org.geotools.metadata.iso.lineage;version="${project.version}"
+                          ,org.geotools.metadata.iso.maintenance;version="${project.version}"
+                          ,org.geotools.metadata.iso.quality;version="${project.version}"
+                          ,org.geotools.metadata.iso.spatial;version="${project.version}"
+                          ,org.geotools.metadata.sql;version="${project.version}"
+                          ,org.geotools.resources;version="${project.version}";${project.artifactId}=split;mandatory:=${project.artifactId}
+                          ,org.geotools.resources.i18n;version="${project.version}"
+                          ,org.geotools.text;version="${project.version}"
+                          ,org.geotools.util;version="${project.version}"
+                          ,org.geotools.util.logging;version="${project.version}"
+                      </Export-Package>
+                  </instructions>
+              </configuration>
+          </plugin>
+      </plugins>
+      <resources>
       <resource>
         <directory>${basedir}/src/main/resources</directory>
       </resource>

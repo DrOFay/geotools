@@ -36,7 +36,7 @@
   </scm>
 
   <description>
-    Standard interfaces implemented throughout the library.
+    Standard interfaces implemented throughout the library.  This module is OSGi compliant.
   </description>
 
   <licenses>

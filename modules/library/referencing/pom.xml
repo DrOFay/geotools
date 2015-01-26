@@ -25,7 +25,7 @@
   <!-- =========================================================== -->
   <groupId>org.geotools</groupId>
   <artifactId>gt-referencing</artifactId>
-  <packaging>jar</packaging>
+  <packaging>bundle</packaging>
   <name>Referencing services</name>
   
 
@@ -38,7 +38,7 @@
 
   <description>
     Contains implementations of Coordinate Reference Systems (CRS),
-    conversion and transformation services.
+    conversion and transformation services.  This module is OSGi compliant.
   </description>
 
   <licenses>
@@ -166,8 +166,110 @@
         <role>Java developper</role>
       </roles>
     </contributor>
+    <contributor>
+      <name>David Fay</name>
+      <roles>
+        <role>Java/OSGi Developer</role>
+      </roles>
+    </contributor>
   </contributors>
 
+    <build>
+        <plugins>
+            <!-- for information on this plugin, visit http://felix.apache.org/site/apache-felix-maven-bundle-plugin-bnd.html -->
+            <plugin>
+                <groupId>org.apache.felix</groupId>
+                <artifactId>maven-bundle-plugin</artifactId>
+                <version>2.3.7</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <unpackBundle>true</unpackBundle>
+                    <supportedProjectTypes>
+                        <supportedProjectType>war</supportedProjectType>
+                        <supportedProjectType>jar</supportedProjectType>
+                        <supportedProjectType>bundle</supportedProjectType>
+                    </supportedProjectTypes>
+                    <instructions>
+                        <Application-TraceLevels>*=info</Application-TraceLevels>
+                        <Bundle-SymbolicName>${project.artifactId}</Bundle-SymbolicName>
+                        <Import-Package>
+                            au.com.objectix.jgridshift
+                            ,javax.imageio.spi
+                            ,javax.measure.converter
+                            ,javax.measure.quantity
+                            ,javax.measure.unit
+                            ,javax.media.jai
+                            ,javax.media.jai.registry
+                            ,javax.media.jai.util
+                            ,javax.naming
+                            ,javax.sql
+                            ,javax.swing
+                            ,javax.swing.border
+                            ,javax.swing.event
+                            ,javax.swing.tree
+                            ,javax.vecmath
+                            ,org.apache.commons.pool
+                            ,org.apache.commons.pool.impl
+                            ,org.geotools.factory
+                            ,org.geotools.io
+                            ,org.geotools.math
+                            ,org.geotools.metadata
+                            ,org.geotools.metadata.iso
+                            ,org.geotools.metadata.iso.citation
+                            ,org.geotools.metadata.iso.extent
+                            ,org.geotools.metadata.iso.quality
+                            ,org.geotools.resources
+                            ,org.geotools.resources.i18n
+                            ,org.geotools.util
+                            ,org.geotools.util.logging
+                            ,org.opengis.coverage.grid
+                            ,org.opengis.geometry
+                            ,org.opengis.geometry.aggregate
+                            ,org.opengis.geometry.complex
+                            ,org.opengis.geometry.coordinate
+                            ,org.opengis.geometry.primitive
+                            ,org.opengis.metadata
+                            ,org.opengis.metadata.citation
+                            ,org.opengis.metadata.extent
+                            ,org.opengis.metadata.quality
+                            ,org.opengis.metadata.spatial
+                            ,org.opengis.parameter
+                            ,org.opengis.referencing
+                            ,org.opengis.referencing.crs
+                            ,org.opengis.referencing.cs
+                            ,org.opengis.referencing.datum
+                            ,org.opengis.referencing.operation
+                            ,org.opengis.util
+                            ,org.w3c.dom
+                        </Import-Package>
+                        <Export-Package>
+                            org.geotools.geometry;version="${project.version}"
+                            ,org.geotools.measure;version="${project.version}"
+                            ,org.geotools.metadata.iso.spatial;version="${project.version}"
+                            ,org.geotools.nature;version="${project.version}"
+                            ,org.geotools.parameter;version="${project.version}"
+                            ,org.geotools.referencing;version="${project.version}"
+                            ,org.geotools.referencing.crs;version="${project.version}"
+                            ,org.geotools.referencing.cs;version="${project.version}"
+                            ,org.geotools.referencing.datum;version="${project.version}"
+                            ,org.geotools.referencing.factory;version="${project.version}"
+                            ,org.geotools.referencing.factory.epsg;version="${project.version}"
+                            ,org.geotools.referencing.factory.gridshift;version="${project.version}"
+                            ,org.geotools.referencing.factory.wms;version="${project.version}"
+                            ,org.geotools.referencing.operation;version="${project.version}"
+                            ,org.geotools.referencing.operation.builder;version="${project.version}"
+                            ,org.geotools.referencing.operation.matrix;version="${project.version}"
+                            ,org.geotools.referencing.operation.projection;version="${project.version}"
+                            ,org.geotools.referencing.operation.transform;version="${project.version}"
+                            ,org.geotools.referencing.wkt;version="${project.version}"
+                            ,org.geotools.resources;version="${project.version}";${project.artifactId}=split;mandatory:=${project.artifactId}
+                            ,org.geotools.resources.geometry;version="${project.version}"
+                        </Export-Package>
+                    </instructions>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 
   <!-- =========================================================== -->
   <!--     Dependency Management                                   -->
@@ -175,14 +277,14 @@
   <dependencies>
     <!-- NOTE: The referencing module does not depends on JTS. -->
     <dependency>
-      <groupId>java3d</groupId>
-      <artifactId>vecmath</artifactId>
-      <!-- The version number is specified in the parent POM. -->
+        <groupId>java3d.osgi</groupId>
+        <artifactId>java3d.osgi.vecmath</artifactId>
+        <version>1.3.1</version>
     </dependency>
     <dependency>
-      <groupId>commons-pool</groupId>
-      <artifactId>commons-pool</artifactId>
-      <!-- The version number is specified in the parent POM. -->
+        <groupId>org.apache.commons</groupId>
+        <artifactId>com.springsource.org.apache.commons.pool</artifactId>
+        <version>1.5.3</version>
     </dependency>
     <dependency>
       <groupId>org.geotools</groupId>
@@ -191,7 +293,7 @@
     </dependency>
     <dependency>
       <groupId>jgridshift</groupId>
-      <artifactId>jgridshift</artifactId>
+      <artifactId>jgridshift-osgi</artifactId>
       <version>1.0</version>
     </dependency>
 
